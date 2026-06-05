@@ -2,8 +2,8 @@
 
 Automated, glass-box data science. Point it at a data file, get a fitted model and a report of every decision behind it.
 
-[![PyPI version](https://img.shields.io/pypi/v/mudra-ml.svg)](https://pypi.org/project/mudra-ml/)
-[![Python versions](https://img.shields.io/pypi/pyversions/mudra-ml.svg)](https://pypi.org/project/mudra-ml/)
+[![PyPI version](https://img.shields.io/pypi/v/mudra-ml.svg?v=1)](https://pypi.org/project/mudra-ml/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mudra-ml.svg?v=1)](https://pypi.org/project/mudra-ml/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/MuditNautiyal-21/mudra-ml/actions/workflows/ci.yml/badge.svg)](https://github.com/MuditNautiyal-21/mudra-ml/actions/workflows/ci.yml)
 
