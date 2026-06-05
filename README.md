@@ -1,4 +1,4 @@
-# MudraML
+# Mudra-ML
 
 Automated, glass-box data science. Point it at a data file, get a fitted model and a report of every decision behind it.
 
