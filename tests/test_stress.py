@@ -4,21 +4,15 @@ Every case here represents a class of dataset the library should survive.
 For each case the full pipeline runs end to end. The case fails if the
 pipeline raises or the report file is missing. Where a specific warning is
 expected, the case asserts the warning fires.
-
-Results from a stress run are captured in `.agent/` by the build harness;
-the tests here verify behavior on every dataset and do not depend on the
-capture file.
 """
 
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 from sklearn.datasets import (
     load_breast_cancer,
     load_iris,
@@ -30,8 +24,6 @@ from mudra_ml import Mudra
 from mudra_ml.core import RunResult
 from mudra_ml.profile import DataProfiler
 from mudra_ml.quality import check_quality
-
-_ARTIFACT_DIR_NAME = ".agent"
 
 
 def _run(
@@ -57,27 +49,8 @@ def _run(
 
 
 def _capture(case: str, payload: dict) -> None:
-    """Append a single case result to the private stress log."""
-    root = Path(__file__).resolve().parent.parent / _ARTIFACT_DIR_NAME
-    root.mkdir(exist_ok=True)
-    path = root / "STRESS_RESULTS.jsonl"
-    payload = {"case": case, **payload}
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, default=str) + "\n")
-
-
-@pytest.fixture(autouse=True)
-def _clear_capture_once(request, tmp_path):
-    """Truncate the capture file once at the start of the first stress test."""
-    flag = "_stress_initialized"
-    if not getattr(request.session, flag, False):
-        root = Path(__file__).resolve().parent.parent / _ARTIFACT_DIR_NAME
-        root.mkdir(exist_ok=True)
-        path = root / "STRESS_RESULTS.jsonl"
-        if path.exists():
-            path.unlink()
-        setattr(request.session, flag, True)
-    yield
+    """No-op kept so individual cases stay tidy. Run timings are visible in pytest output."""
+    return None
 
 
 # ---------------------------------------------------------------------------
