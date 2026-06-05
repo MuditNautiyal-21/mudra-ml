@@ -5,7 +5,7 @@ Automated, glass-box data science. Point it at a data file, get a fitted model a
 [![PyPI version](https://img.shields.io/pypi/v/mudra-ml.svg)](https://pypi.org/project/mudra-ml/)
 [![Python versions](https://img.shields.io/pypi/pyversions/mudra-ml.svg)](https://pypi.org/project/mudra-ml/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/MuditNautiyal-21/MudraML/actions/workflows/ci.yml/badge.svg)](https://github.com/MuditNautiyal-21/MudraML/actions/workflows/ci.yml)
+[![CI](https://github.com/MuditNautiyal-21/mudra-ml/actions/workflows/ci.yml/badge.svg)](https://github.com/MuditNautiyal-21/mudra-ml/actions/workflows/ci.yml)
 
 MudraML automates the common data science workflow and shows its work. You point it at a data file, optionally state a goal, and it ingests the data, profiles it, cleans it, picks an algorithm, trains and tunes a shortlist of models, evaluates them, and returns the best fitted model together with a report of every decision it made and the rule behind that decision.
 
