@@ -1,0 +1,38 @@
+# Private working notes, never tracked
+.agent/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Environments
+.venv*/
+venv/
+env/
+
+# Credentials
+.pypirc
+
+# Editor and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated run output
+mudraml_report.*
+run_artifact*
+*.joblib
