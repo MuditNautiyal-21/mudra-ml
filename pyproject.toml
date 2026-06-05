@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mudraml"
+name = "mudra-ml"
 version = "0.1.0"
 description = "Glass-box autonomous data science: profile, clean, model, and explain every decision."
 readme = "README.md"
@@ -63,14 +63,14 @@ Issues = "https://github.com/MuditNautiyal-21/MudraML/issues"
 Changelog = "https://github.com/MuditNautiyal-21/MudraML/blob/main/CHANGELOG.md"
 
 [project.scripts]
-mudraml = "mudraml.cli:app"
+mudra-ml = "mudra_ml.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mudraml"]
+packages = ["src/mudra_ml"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "src/mudraml",
+    "src/mudra_ml",
     "tests",
     "README.md",
     "CHANGELOG.md",
@@ -89,7 +89,7 @@ ignore = ["B008"]
 
 [tool.ruff.lint.per-file-ignores]
 # The report module holds long inline HTML and markdown templates.
-"src/mudraml/report.py" = ["E501"]
+"src/mudra_ml/report.py" = ["E501"]
 "tests/*" = ["E501"]
 
 [tool.pytest.ini_options]
@@ -97,7 +97,7 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.coverage.run]
-source = ["mudraml"]
+source = ["mudra_ml"]
 branch = true
 
 [tool.mypy]

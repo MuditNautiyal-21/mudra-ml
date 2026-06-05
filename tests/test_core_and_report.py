@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from mudraml import Mudra
-from mudraml.report import ReportContext, render_html, render_markdown
+from mudra_ml import Mudra
+from mudra_ml.report import ReportContext, render_html, render_markdown
 
 
 def test_end_to_end_classification(tmp_path, classification_frame):

@@ -33,6 +33,6 @@ env/
 Thumbs.db
 
 # Generated run output
-mudraml_report.*
+mudra_ml_report.*
 run_artifact*
 *.joblib

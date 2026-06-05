@@ -31,7 +31,7 @@ jobs:
         run: ruff check src tests
 
       - name: Type check
-        run: mypy src/mudraml
+        run: mypy src/mudra_ml
 
       - name: Test
-        run: pytest --cov=mudraml --cov-report=term-missing
+        run: pytest --cov=mudra_ml --cov-report=term-missing

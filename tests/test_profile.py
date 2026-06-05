@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from mudraml.profile import (
+from mudra_ml.profile import (
     BOOLEAN,
     CATEGORICAL,
     DATETIME,

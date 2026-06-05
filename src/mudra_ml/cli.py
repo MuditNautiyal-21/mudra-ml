@@ -32,7 +32,7 @@ def run(
     max_train_seconds: int | None = typer.Option(
         None, help="Soft time budget that caps model complexity."
     ),
-    output: str = typer.Option("mudraml_report", help="Report path without suffix."),
+    output: str = typer.Option("mudra_ml_report", help="Report path without suffix."),
     save: str | None = typer.Option(None, help="Save the artifact to this path."),
     no_html: bool = typer.Option(False, help="Skip the HTML report."),
 ) -> None:

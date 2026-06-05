@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from mudraml.preprocess import OutlierClipper, build_pipeline, plan_preprocess
-from mudraml.profile import DataProfiler
+from mudra_ml.preprocess import OutlierClipper, build_pipeline, plan_preprocess
+from mudra_ml.profile import DataProfiler
 
 
 def test_pipeline_fit_transform_shape(mixed_frame):
@@ -95,7 +95,7 @@ def test_missing_threshold_constraint(frame_with_missing):
 
 
 def test_unseen_category_maps_to_zero():
-    from mudraml.preprocess import FrequencyEncoder
+    from mudra_ml.preprocess import FrequencyEncoder
 
     train = pd.DataFrame({"c": ["a", "a", "b"]})
     enc = FrequencyEncoder().fit(train)

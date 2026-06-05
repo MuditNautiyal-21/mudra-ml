@@ -11,11 +11,11 @@ from pathlib import Path
 
 from sklearn.datasets import fetch_california_housing, load_breast_cancer, load_iris
 
-from mudraml import Mudra
+from mudra_ml import Mudra
 
 
 def main() -> None:
-    out = Path(tempfile.mkdtemp(prefix="mudraml_example_"))
+    out = Path(tempfile.mkdtemp(prefix="mudra_ml_example_"))
 
     classification = load_breast_cancer(as_frame=True).frame
     clf_path = out / "breast_cancer.csv"

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from sklearn.model_selection import train_test_split
 
-from mudraml.evaluate import evaluate
-from mudraml.recommend import recommend_models
+from mudra_ml.evaluate import evaluate
+from mudra_ml.recommend import recommend_models
 
 
 def _split(frame, target):

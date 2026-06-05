@@ -3,8 +3,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from mudraml.goal import Goal, infer_goal
-from mudraml.profile import DataProfiler
+from mudra_ml.goal import Goal, infer_goal
+from mudra_ml.profile import DataProfiler
 
 
 def _profile(frame):

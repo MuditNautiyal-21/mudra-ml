@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from mudraml.cli import app
+from mudra_ml.cli import app
 
 runner = CliRunner()
 

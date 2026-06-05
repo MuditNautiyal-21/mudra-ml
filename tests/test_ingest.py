@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mudraml.ingest import IngestError, load
+from mudra_ml.ingest import IngestError, load
 
 
 def test_load_csv(tmp_path, classification_frame):

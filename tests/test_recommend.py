@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mudraml.recommend import recommend_models
+from mudra_ml.recommend import recommend_models
 
 
 def test_classification_shortlist_nonempty():

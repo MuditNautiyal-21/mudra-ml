@@ -84,7 +84,7 @@ def _load_excel(path: Path) -> pd.DataFrame:
     except ImportError as exc:
         raise IngestError(
             "Reading Excel files needs openpyxl. Install it with "
-            "'pip install mudraml[excel]'."
+            "'pip install mudra-ml[excel]'."
         ) from exc
 
 
@@ -102,7 +102,7 @@ def _load_parquet(path: Path) -> pd.DataFrame:
     except ImportError as exc:
         raise IngestError(
             "Reading Parquet files needs pyarrow. Install it with "
-            "'pip install mudraml[parquet]'."
+            "'pip install mudra-ml[parquet]'."
         ) from exc
 
 

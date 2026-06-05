@@ -111,7 +111,7 @@ class Mudra:
         task: str | None = None,
         metric: str | None = None,
         constraints: dict[str, Any] | None = None,
-        report_path: str | Path = "mudraml_report",
+        report_path: str | Path = "mudra_ml_report",
         html: bool = True,
         use_boost: bool = True,
     ) -> RunResult:
