@@ -11,6 +11,7 @@ import pandas as pd
 from .constants import (
     CATEGORICAL_MAX_RATIO,
     CATEGORICAL_MAX_UNIQUE,
+    DISCRETE_NUMERIC_MAX_UNIQUE,
     ID_UNIQUE_RATIO,
     TEXT_MIN_AVG_LENGTH,
     TEXT_MIN_WORD_COUNT,
@@ -90,17 +91,42 @@ def _looks_like_datetime(series: pd.Series) -> bool:
 def _is_boolean(series: pd.Series, n_unique: int) -> bool:
     if pd.api.types.is_bool_dtype(series):
         return True
-    if n_unique > 2:
+    if n_unique == 0 or n_unique > 2:
         return False
-    values = {str(v).strip().lower() for v in series.dropna().unique()}
+    non_null = series.dropna()
+    if pd.api.types.is_numeric_dtype(series):
+        try:
+            arr = np.asarray(non_null, dtype=float)
+        except (TypeError, ValueError):
+            return False
+        if arr.size == 0 or not np.all(np.isfinite(arr)):
+            return False
+        if not np.allclose(arr, np.round(arr)):
+            return False
+        ints = {int(round(v)) for v in arr}
+        return ints.issubset({0, 1})
+    values = {str(v).strip().lower() for v in non_null.unique()}
     boolean_sets = [
         {"true", "false"},
         {"yes", "no"},
         {"t", "f"},
         {"y", "n"},
-        {"0", "1"},
     ]
     return any(values.issubset(s) for s in boolean_sets) and len(values) > 0
+
+
+def _is_integer_like(series: pd.Series) -> bool:
+    """True when every non-null value equals its rounded form."""
+    non_null = series.dropna()
+    if non_null.empty:
+        return False
+    try:
+        arr = np.asarray(non_null, dtype=float)
+    except (TypeError, ValueError):
+        return False
+    if not np.all(np.isfinite(arr)):
+        return False
+    return bool(np.allclose(arr, np.round(arr)))
 
 
 def _avg_text_length(series: pd.Series) -> float:
@@ -127,9 +153,16 @@ def _infer_type(series: pd.Series, n_unique: int, n_rows: int) -> str:
         return DATETIME
     if pd.api.types.is_numeric_dtype(series):
         if unique_ratio >= ID_UNIQUE_RATIO and n_unique > CATEGORICAL_MAX_UNIQUE:
-            integer_like = (non_null == non_null.round()).all() if len(non_null) else False
-            if integer_like:
+            if _is_integer_like(series):
                 return ID
+        # Low-cardinality integer columns are discrete labels. IQR clipping
+        # and continuous scaling would distort them. Route to categorical
+        # so they get one-hot encoded instead.
+        if (
+            3 <= n_unique <= DISCRETE_NUMERIC_MAX_UNIQUE
+            and _is_integer_like(series)
+        ):
+            return CATEGORICAL
         return NUMERIC
 
     if unique_ratio >= ID_UNIQUE_RATIO and n_unique > CATEGORICAL_MAX_UNIQUE:
@@ -169,7 +202,7 @@ class DataProfiler:
     """
 
     def __init__(self, log: DecisionLog | None = None) -> None:
-        self.log = log or DecisionLog()
+        self.log = log if log is not None else DecisionLog()
 
     def profile(self, frame: pd.DataFrame) -> DataProfile:
         """Profile every column and detect candidate target columns.
@@ -218,6 +251,23 @@ class DataProfiler:
                     "missing_fraction": round(missing / max(n_rows, 1), 4),
                 },
             )
+            if (
+                inferred == CATEGORICAL
+                and pd.api.types.is_numeric_dtype(series)
+                and 3 <= n_unique <= DISCRETE_NUMERIC_MAX_UNIQUE
+            ):
+                self.log.record(
+                    "profile",
+                    f"Column '{name}' is an integer column with {n_unique} "
+                    f"distinct values. Treated as a discrete label, not a "
+                    f"continuous measurement, to keep outlier clipping and "
+                    f"scaling from distorting the signal.",
+                    "discrete-low-cardinality-integer",
+                    {
+                        "n_unique": n_unique,
+                        "threshold": DISCRETE_NUMERIC_MAX_UNIQUE,
+                    },
+                )
 
         candidates = self._candidate_targets(columns, n_rows)
         duplicates = int(frame.duplicated().sum())

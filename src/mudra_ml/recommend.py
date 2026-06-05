@@ -264,7 +264,7 @@ def recommend_models(
     Returns:
         An ordered list of Candidate objects.
     """
-    log = log or DecisionLog()
+    log = log if log is not None else DecisionLog()
     constraints = constraints or {}
 
     if task == "clustering":

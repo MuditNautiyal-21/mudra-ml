@@ -516,7 +516,7 @@ def evaluate_supervised(
     Returns:
         An EvaluationResult with the selected model and the diagnostic block.
     """
-    log = log or DecisionLog()
+    log = log if log is not None else DecisionLog()
     scoring = _SKLEARN_SCORING.get(metric, "accuracy" if task == "classification" else "r2")
     effective_cv = max(2, min(cv, _min_class_count(y_train, task)))
 
@@ -651,7 +651,7 @@ def evaluate_clustering(
     Returns:
         An EvaluationResult with the fitted clusterer.
     """
-    log = log or DecisionLog()
+    log = log if log is not None else DecisionLog()
     grid = candidate.param_grid.get("n_clusters", [2, 3, 4, 5])
     results: list[CandidateResult] = []
     best_estimator = None

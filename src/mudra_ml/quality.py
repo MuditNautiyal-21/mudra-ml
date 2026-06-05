@@ -536,7 +536,7 @@ def assess_dataset(
     Returns:
         A tuple of (DataProfile, QualityReport).
     """
-    log = log or DecisionLog()
+    log = log if log is not None else DecisionLog()
     profile = DataProfiler(log).profile(frame)
     quality = check_quality(frame, profile, target, task, log)
     return profile, quality

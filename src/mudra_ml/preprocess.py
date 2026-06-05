@@ -120,6 +120,54 @@ class OutlierClipper(BaseEstimator, TransformerMixin):
         return input_features
 
 
+class BooleanToNumeric(BaseEstimator, TransformerMixin):
+    """Cast a boolean column to a clean float 0/1 array.
+
+    Accepts numeric 0/1 (int or float), Python and numpy bool, and the
+    common string forms (true/false, yes/no, t/f, y/n). Anything else
+    maps to 0. The transformer learns nothing during fit, so it is
+    leakage-safe by construction.
+    """
+
+    _TRUE_TOKENS = frozenset({"true", "yes", "t", "y", "1", "1.0"})
+
+    def fit(self, X: Any, y: Any = None) -> BooleanToNumeric:
+        arr = np.asarray(X)
+        # n_features_in_ records the fit shape, so scikit-learn's
+        # check_is_fitted recognises this transformer as fitted.
+        self.n_features_in_ = arr.shape[1] if arr.ndim > 1 else 1
+        return self
+
+    def transform(self, X: Any) -> np.ndarray:
+        arr = np.asarray(X, dtype=object)
+        if arr.ndim == 1:
+            arr = arr.reshape(-1, 1)
+        out = np.zeros(arr.shape, dtype=float)
+        for j in range(arr.shape[1]):
+            column = arr[:, j]
+            for i, value in enumerate(column):
+                if value is None:
+                    continue
+                if isinstance(value, (bool, np.bool_)):
+                    out[i, j] = 1.0 if bool(value) else 0.0
+                    continue
+                if isinstance(value, str):
+                    if value.strip().lower() in self._TRUE_TOKENS:
+                        out[i, j] = 1.0
+                    continue
+                try:
+                    numeric = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if not np.isfinite(numeric):
+                    continue
+                out[i, j] = 1.0 if numeric != 0.0 else 0.0
+        return out
+
+    def get_feature_names_out(self, input_features: Any = None) -> Any:
+        return input_features
+
+
 class FrequencyEncoder(BaseEstimator, TransformerMixin):
     """Encode high-cardinality categories by their training-set frequency.
 
@@ -156,6 +204,7 @@ class PreprocessPlan:
     """The columns assigned to each handling strategy."""
 
     numeric: list[str] = field(default_factory=list)
+    boolean: list[str] = field(default_factory=list)
     categorical_low: list[str] = field(default_factory=list)
     categorical_high: list[str] = field(default_factory=list)
     datetime: list[str] = field(default_factory=list)
@@ -166,6 +215,7 @@ class PreprocessPlan:
     def as_dict(self) -> dict[str, Any]:
         return {
             "numeric": self.numeric,
+            "boolean": self.boolean,
             "categorical_low": self.categorical_low,
             "categorical_high": self.categorical_high,
             "datetime": self.datetime,
@@ -181,6 +231,21 @@ def _numeric_pipeline(outlier_strategy: str) -> Pipeline:
             ("impute", SimpleImputer(strategy="median")),
             ("clip", OutlierClipper(strategy=outlier_strategy)),
             ("scale", StandardScaler()),
+        ]
+    )
+
+
+def _boolean_pipeline() -> Pipeline:
+    """Discrete pipeline for binary columns.
+
+    Mode imputation fills missing entries with the more common value, then
+    BooleanToNumeric returns a 0/1 float array. No outlier clipping and no
+    scaling: those steps collapse skewed binary columns to a constant.
+    """
+    return Pipeline(
+        [
+            ("impute", SimpleImputer(strategy="most_frequent")),
+            ("cast", BooleanToNumeric()),
         ]
     )
 
@@ -257,12 +322,20 @@ def plan_preprocess(
             )
             continue
 
-        if col.inferred_type in (NUMERIC, BOOLEAN):
-            plan.numeric.append(col.name)
-            strategy = "median" if col.inferred_type == NUMERIC else "most_frequent"
+        if col.inferred_type == BOOLEAN:
+            plan.boolean.append(col.name)
             log.record(
                 "preprocess",
-                f"'{col.name}': {strategy} imputation, outlier clip ({outlier_strategy}), scale.",
+                f"'{col.name}': mode imputation, pass through as 0/1. "
+                f"Discrete column, so no outlier clipping and no scaling.",
+                "boolean-discrete-handling",
+                {"type": col.inferred_type, "n_unique": col.n_unique},
+            )
+        elif col.inferred_type == NUMERIC:
+            plan.numeric.append(col.name)
+            log.record(
+                "preprocess",
+                f"'{col.name}': median imputation, outlier clip ({outlier_strategy}), scale.",
                 "numeric-handling",
                 {"type": col.inferred_type},
             )
@@ -319,7 +392,14 @@ def _recover_if_empty(
     In that case the id columns are reinstated by their underlying dtype.
     """
     has_features = any(
-        [plan.numeric, plan.categorical_low, plan.categorical_high, plan.datetime, plan.text]
+        [
+            plan.numeric,
+            plan.boolean,
+            plan.categorical_low,
+            plan.categorical_high,
+            plan.datetime,
+            plan.text,
+        ]
     )
     if has_features or not dropped_ids:
         return
@@ -360,12 +440,14 @@ def build_pipeline(
     Returns:
         A tuple of (pipeline, plan).
     """
-    log = log or DecisionLog()
+    log = log if log is not None else DecisionLog()
     plan = plan_preprocess(profile, target, constraints, log)
 
     transformers = []
     if plan.numeric:
         transformers.append(("numeric", _numeric_pipeline(plan.outlier_strategy), plan.numeric))
+    if plan.boolean:
+        transformers.append(("boolean", _boolean_pipeline(), plan.boolean))
     if plan.categorical_low:
         transformers.append(("categorical_low", _low_cardinality_pipeline(), plan.categorical_low))
     if plan.categorical_high:

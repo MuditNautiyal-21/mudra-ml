@@ -144,7 +144,7 @@ def infer_goal(
     Returns:
         A Goal with target, task, and metric all set.
     """
-    log = log or DecisionLog()
+    log = log if log is not None else DecisionLog()
     goal = goal or Goal()
     goal.validate()
 

@@ -16,6 +16,12 @@ TEXT_MIN_AVG_LENGTH = 25
 TEXT_MIN_WORD_COUNT = 3
 HIGH_CARDINALITY_THRESHOLD = 30
 
+# Integer columns with this many or fewer distinct values are treated as
+# discrete labels, not continuous measurements. IQR outlier clipping and
+# continuous scaling are unsafe on them: a skewed binary 0/1 collapses to
+# a constant under IQR, which destroys the signal.
+DISCRETE_NUMERIC_MAX_UNIQUE = 10
+
 # Cleaning thresholds.
 DEFAULT_MISSING_DROP_THRESHOLD = 0.6
 IQR_MULTIPLIER = 1.5
