@@ -57,36 +57,55 @@ When `interpretable` is set, the shortlist is limited to models you can read dir
 
 ## What the report looks like
 
-Every run writes a report that records each decision and the rule that produced it. An excerpt:
+Every run writes a markdown report and an HTML report. The HTML report carries the same content plus diagnostic charts (confusion matrix heatmap, ROC and precision-recall curves, target distribution, feature correlation, residual and predicted-versus-actual plots for regression). The block below is an excerpt from a real run on the scikit-learn breast cancer dataset.
 
 ```
-GOAL
-  task    classification   (inferred: target has 2 unique values)
-  target  churn            (operator-set)
-  metric  f1               (default for classification)
+## Trust summary
 
-PROFILE
-  18 columns: 12 numeric, 5 categorical, 1 datetime
-  dropped customer_id (id column, 100 percent unique)
-  missing: tenure 3.2 percent, region 0.1 percent
+Held-out test size: 114 rows. Training size: 455 rows.
+Baseline: dummy_most_frequent (no learning, predicts the most frequent class or the mean).
 
-PREPROCESS  (fit on train split only)
-  tenure        median imputation         (3.2 percent missing, below 40 percent drop threshold)
-  region        most-frequent imputation, one-hot   (4 categories, low cardinality)
-  signup_date   extracted year, month, day-of-week
-  numeric       standard scaling
+| Metric    | Best model | Baseline | Difference |
+| --------- | ---------- | -------- | ---------- |
+| accuracy  | 0.9737     | 0.6316   | 0.3421     |
+| f1        | 0.9793     | 0.7742   | 0.2051     |
+| precision | 0.9726     | 0.6316   | 0.3410     |
+| recall    | 0.9861     | 1.0000   | -0.0139    |
+| roc_auc   | 0.9970     | 0.5000   | 0.4970     |
 
-RECOMMEND
-  shortlist     logistic regression, random forest, gradient boosting
-  rule          classification, 5000 rows, 23 features after encoding, no interpretable constraint
+Train vs test gap on selected metrics (positive means train is better than test).
 
-EVALUATE  (held-out test)
-  best          gradient boosting   f1 0.81
-  also          random forest 0.79, logistic regression 0.74
-  top features  tenure, monthly_charges, contract_type
+| Metric    | Train  | Test   | Gap    |
+| --------- | ------ | ------ | ------ |
+| accuracy  | 0.9846 | 0.9737 | 0.0109 |
+| f1        | 0.9878 | 0.9793 | 0.0085 |
+| precision | 0.9793 | 0.9726 | 0.0067 |
+| recall    | 0.9965 | 0.9861 | 0.0104 |
+
+## Result
+
+Selected model: logistic_regression
+Cross-validation score: 0.9801 +/- 0.0129
+
+### Per-class report
+
+| Class | Precision | Recall | F1     | Support |
+| ----- | --------- | ------ | ------ | ------- |
+| 0     | 0.9756    | 0.9524 | 0.9639 | 42      |
+| 1     | 0.9726    | 0.9861 | 0.9793 | 72      |
+
+## Feature importance (permutation, mean across 10 repeats)
+
+Impurity importance is biased toward high-cardinality features. The permutation view is more reliable because it scores each feature by how much shuffling it hurts the model.
+
+- worst smoothness: 0.0193 (+/- 0.0102)
+- worst texture: 0.0175 (+/- 0.0111)
+- area error: 0.0149 (+/- 0.0111)
+- worst concave points: 0.0114 (+/- 0.0056)
+- mean smoothness: 0.0105 (+/- 0.0086)
 ```
 
-The numbers above are illustrative. Your run writes the real values for your data.
+The numbers above come from a real run. The HTML report adds confusion matrix, ROC, and precision-recall charts alongside these tables.
 
 ## Predict and reuse
 
@@ -129,9 +148,19 @@ One `random_state` is threaded through every stochastic step (the split, the sea
 
 | Task | Default metric | Also reported |
 | --- | --- | --- |
-| classification | f1 | accuracy, precision, recall, roc_auc, confusion matrix |
-| regression | rmse | mae, mse, r2 |
+| classification | f1 | accuracy, precision, recall, roc_auc, per-class precision/recall/f1, confusion matrix, ROC and precision-recall curves |
+| regression | rmse | mae, mse, r2, residual mean and std, predicted vs actual |
 | clustering | silhouette | davies_bouldin |
+
+## Trust and data quality
+
+Every run reports the headline metrics against a naive baseline (most-frequent class for classification, mean for regression), the cross-validation score as mean plus or minus standard deviation across folds, and the train versus test gap so that overfitting is visible. When the held-out set is below 50 rows the metrics are labeled indicative only. Permutation importance with its standard deviation is reported alongside impurity importance, with a note that impurity importance is biased toward high-cardinality features.
+
+The data-quality section calls out constant columns, duplicate rows, high-cardinality categoricals, class imbalance, missing targets, and features that look suspiciously predictive of the target (a simple leakage check). A limitations and next-steps section turns those warnings into concrete actions.
+
+## Stress tested
+
+The pipeline is exercised against a battery of adversarial datasets: a tiny set, a single-feature set, a single-class target, an all-missing column, a constant column, all-duplicate rows, a wide dataset, an id-like high-cardinality feature, a strongly imbalanced target, mixed dtypes with messy datetimes, a leakage-injected dataset where a feature equals the target, a target with missing values, and a 10k-row dataset. All four task variants run: binary and multiclass classification, regression, and clustering.
 
 ## Scope
 
