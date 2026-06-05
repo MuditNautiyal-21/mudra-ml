@@ -18,6 +18,7 @@ from .goal import Goal, infer_goal
 from .ingest import load
 from .preprocess import build_pipeline
 from .profile import DataProfile, DataProfiler
+from .quality import check_quality
 from .recommend import recommend_models
 from .report import build_context, write_report
 
@@ -149,6 +150,8 @@ class Mudra:
         # infer_goal always resolves task and metric.
         assert goal.task is not None and goal.metric is not None
 
+        quality = check_quality(frame, profile, goal.target, goal.task, self.log)
+
         if goal.task == "clustering":
             evaluation = self._run_clustering(frame, profile, goal)
         else:
@@ -162,6 +165,9 @@ class Mudra:
             operator_set_fields=operator_fields,
             log=self.log,
             evaluation=evaluation["evaluation_dict"],
+            profile=profile,
+            quality=quality,
+            frame=frame,
         )
         written = write_report(ctx, report_path, html=html)
 

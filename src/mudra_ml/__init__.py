@@ -13,10 +13,11 @@ from .goal import Goal, infer_goal
 from .ingest import load
 from .preprocess import build_pipeline
 from .profile import DataProfile, DataProfiler
+from .quality import QualityReport, QualityWarning, check_quality
 from .recommend import recommend_models
 from .report import write_report
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Mudra",
@@ -26,6 +27,9 @@ __all__ = [
     "load",
     "DataProfiler",
     "DataProfile",
+    "QualityReport",
+    "QualityWarning",
+    "check_quality",
     "build_pipeline",
     "recommend_models",
     "evaluate",
