@@ -8,6 +8,23 @@ Keep a Changelog, and the project uses semantic versioning.
 This release overhauls the report and the evaluation so the output earns the
 trust of a working data scientist. The public API is unchanged.
 
+### Fixed
+- Skewed binary 0/1 features were being collapsed to a constant by IQR
+  outlier clipping in the numeric pipeline. A 10/90 binary column has
+  Q1 = Q3 = 0, the IQR rule clipped everything to zero, and the column lost
+  all signal. Boolean columns now go through a discrete pipeline (mode
+  imputation, cast to 0/1 float, no clipping, no scaling) so a binary feature
+  that predicts the target retains nonzero permutation importance. Integer
+  columns with three to ten distinct values are now classified as categorical
+  and one-hot encoded rather than scaled as continuous values, on the same
+  principle. The leakage check is unchanged and still flags a feature equal
+  to the target. New constant: `DISCRETE_NUMERIC_MAX_UNIQUE = 10`.
+- Decision-log entries from the profile, goal, recommend, and quality stages
+  were being lost when the caller passed an empty `DecisionLog` because the
+  `log or DecisionLog()` pattern treated an empty log as falsy. The check is
+  now `log if log is not None else DecisionLog()` so the caller's log is
+  always used.
+
 ### Added
 - Trust summary in every report: a naive baseline (most-frequent class for
   classification, mean for regression) scored alongside the selected model,
