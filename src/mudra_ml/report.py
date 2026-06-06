@@ -131,9 +131,11 @@ Held-out metrics:
 {% if ctx.candidates %}
 ## Candidates compared
 
-| Model | CV mean | CV std | Test {{ ctx.metric }} |
+Ranked by cross-validation {{ ctx.metric }} (mean across folds). The held-out test set was scored only for the selected model.
+
+| Model | CV mean | CV std | Selected |
 | --- | --- | --- | --- |
-{% for cand in ctx.candidates %}| {{ cand.name }} | {{ fmt(cand.cv_mean) }} | {{ fmt(cand.cv_std) }} | {{ fmt(cand.test_metrics.get(ctx.metric)) }} |
+{% for cand in ctx.candidates %}| {{ cand.name }} | {{ fmt(cand.cv_mean) }} | {{ fmt(cand.cv_std) }} | {{ "yes" if cand.name == ctx.best_name else "no" }} |
 {% endfor %}{% endif %}
 {% if ctx.permutation_importance %}
 ## Feature importance (permutation, mean across {{ perm_repeats }} repeats)
@@ -308,9 +310,10 @@ Cross-validation score: {{ fmt(ctx.cv_mean) }} &plusmn; {{ fmt(ctx.cv_std) }}</p
 {% endif %}
 
 {% if ctx.candidates %}<h2>Candidates compared</h2>
+<p class="note">Ranked by cross-validation {{ ctx.metric }} (mean across folds). The held-out test set was scored only for the selected model.</p>
 <table>
-<tr><th>Model</th><th>CV mean</th><th>CV std</th><th>Test {{ ctx.metric }}</th></tr>
-{% for cand in ctx.candidates %}<tr><td>{{ cand.name }}</td><td>{{ fmt(cand.cv_mean) }}</td><td>{{ fmt(cand.cv_std) }}</td><td>{{ fmt(cand.test_metrics.get(ctx.metric)) }}</td></tr>{% endfor %}
+<tr><th>Model</th><th>CV mean</th><th>CV std</th><th>Selected</th></tr>
+{% for cand in ctx.candidates %}<tr><td>{{ cand.name }}</td><td>{{ fmt(cand.cv_mean) }}</td><td>{{ fmt(cand.cv_std) }}</td><td>{{ "yes" if cand.name == ctx.best_name else "no" }}</td></tr>{% endfor %}
 </table>{% endif %}
 
 {% if ctx.permutation_importance %}<h2>Feature importance (permutation, mean across {{ perm_repeats }} repeats)</h2>

@@ -213,6 +213,30 @@ def _score_value(metrics: dict[str, float], metric: str) -> float:
     return value if metric in _HIGHER_IS_BETTER else -value
 
 
+def _cv_value_for_selection(cv_mean: float, metric: str) -> float:
+    """Higher is better. For metrics where lower is better the value is negated.
+
+    Cross-validation scores returned by _per_fold_scores are already in
+    positive units (negative sklearn scorings are re-flipped), so the only
+    direction adjustment needed is for lower-is-better metrics.
+    """
+    return cv_mean if metric in _HIGHER_IS_BETTER else -cv_mean
+
+
+def _select_best_by_cv(
+    results: list[CandidateResult], metric: str
+) -> CandidateResult:
+    """Pick the candidate with the best cross-validation score for the metric.
+
+    Selection uses only cross-validation. Test-set metrics are never used to
+    rank candidates: the held-out set is scored once, for the selected model,
+    for reporting only.
+    """
+    if not results:
+        raise ValueError("No candidates to rank by cross-validation.")
+    return max(results, key=lambda r: _cv_value_for_selection(r.cv_mean, metric))
+
+
 def _per_fold_scores(
     estimator: Any, X: np.ndarray, y: np.ndarray, scoring: str, cv: int
 ) -> list[float]:
@@ -520,30 +544,21 @@ def evaluate_supervised(
     scoring = _SKLEARN_SCORING.get(metric, "accuracy" if task == "classification" else "r2")
     effective_cv = max(2, min(cv, _min_class_count(y_train, task)))
 
+    # Phase 1: tune and cross-validate every candidate. No test-set scoring
+    # happens here. The test set must not influence selection.
     results: list[CandidateResult] = []
     for candidate in candidates:
         estimator, best_params, cv_score, fold_scores = _tune_one(
             candidate, X_train, y_train, scoring, effective_cv, random_state, log
         )
-        y_pred = estimator.predict(X_test)
-        if task == "classification":
-            test_metrics = _classification_metrics(y_test, y_pred, estimator, X_test)
-            train_metrics = _classification_metrics(
-                y_train, estimator.predict(X_train), estimator, X_train
-            )
-        else:
-            test_metrics = _regression_metrics(y_test, y_pred)
-            train_metrics = _regression_metrics(y_train, estimator.predict(X_train))
         cv_mean = float(np.mean(fold_scores)) if fold_scores else cv_score
         cv_std = float(np.std(fold_scores)) if fold_scores else 0.0
         results.append(
             CandidateResult(
                 name=candidate.name,
                 cv_score=round(cv_score, 6),
-                test_metrics=test_metrics,
-                train_metrics={
-                    k: v for k, v in train_metrics.items() if k != "confusion_matrix"
-                },
+                test_metrics={},
+                train_metrics={},
                 best_params=best_params,
                 estimator=estimator,
                 cv_mean=round(cv_mean, 6),
@@ -552,14 +567,36 @@ def evaluate_supervised(
             )
         )
 
-    best = max(results, key=lambda r: _score_value(r.test_metrics, metric))
-    best_value = best.test_metrics.get(metric, 0.0)
+    # Phase 2: select by cross-validation only.
+    best = _select_best_by_cv(results, metric)
     log.record(
         "evaluate",
-        f"Best model: {best.name} ({metric}={best_value:.4f} on held-out test).",
-        "best-model-selection",
-        {"metric": metric, "value": round(best_value, 4)},
+        f"Best model: {best.name} (cv {metric}={best.cv_mean:.4f} "
+        f"+/- {best.cv_std:.4f}). Selection uses cross-validation only; "
+        f"the held-out test set is scored once, for this model, for "
+        f"reporting only.",
+        "best-model-by-cv",
+        {"metric": metric, "cv_mean": best.cv_mean, "cv_std": best.cv_std},
     )
+
+    # Phase 3: score the held-out test set once, only for the selected model.
+    test_pred = best.estimator.predict(X_test)
+    if task == "classification":
+        test_metrics = _classification_metrics(y_test, test_pred, best.estimator, X_test)
+        train_metrics = _classification_metrics(
+            y_train, best.estimator.predict(X_train), best.estimator, X_train
+        )
+    else:
+        test_metrics = _regression_metrics(y_test, test_pred)
+        train_metrics = _regression_metrics(y_train, best.estimator.predict(X_train))
+    best.test_metrics = test_metrics
+    best.train_metrics = {
+        k: v for k, v in train_metrics.items() if k != "confusion_matrix"
+    }
+
+    # Rank the candidates list so consumers (the report table) see the best
+    # CV scorer first. Test metrics stay empty for the non-selected models.
+    results.sort(key=lambda r: _cv_value_for_selection(r.cv_mean, metric), reverse=True)
 
     importance = _feature_importance(best.estimator, feature_names)
     perm_importance, perm_std = _permutation_importance(
