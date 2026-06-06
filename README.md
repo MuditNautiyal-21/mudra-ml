@@ -133,7 +133,7 @@ mudra-ml profile data.csv
 3. Goal. Rule-based inference of the task, target, and metric, with any field you set taking precedence.
 4. Preprocess. A leakage-safe scikit-learn Pipeline and ColumnTransformer. Imputation, datetime part extraction, outlier clipping, encoding, and scaling are all fit on the training split only.
 5. Recommend. A documented rule set returns a candidate shortlist.
-6. Train and evaluate. Cross-validated training, tuning with RandomizedSearchCV at a fixed seed, held-out scoring, best-model selection, and feature importance where the model exposes it.
+6. Train and evaluate. Cross-validated training and tuning with RandomizedSearchCV at a fixed seed. Model selection follows the cross-validation score, so the held-out test set is scored only once, for the selected model, and never used to choose among candidates. Feature importance is reported where the model exposes it.
 7. Report. Markdown and HTML that log every decision and the rule that produced it.
 
 ## Why leakage safety matters here

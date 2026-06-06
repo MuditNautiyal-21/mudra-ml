@@ -9,6 +9,17 @@ This release overhauls the report and the evaluation so the output earns the
 trust of a working data scientist. The public API is unchanged.
 
 ### Fixed
+- Model selection now uses cross-validation only. The previous selection rule
+  picked the candidate with the best held-out test score, which is the
+  classic test-set leakage mistake: the test set should be scored once, for
+  the single selected model, and used for reporting, not to choose among
+  candidates. Selection now follows the highest cross-validation mean across
+  folds (lower-is-better metrics like rmse and mae are still picked as
+  smallest). The held-out test set is scored once, only for the selected
+  model, and its metrics remain the headline numbers in the report. The
+  candidates-compared table is ranked by cross-validation and shows CV mean,
+  CV std, and a Selected column; the per-candidate test metric column has
+  been removed.
 - Skewed binary 0/1 features were being collapsed to a constant by IQR
   outlier clipping in the numeric pipeline. A 10/90 binary column has
   Q1 = Q3 = 0, the IQR rule clipped everything to zero, and the column lost
