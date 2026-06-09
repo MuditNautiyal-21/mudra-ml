@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mudra-ml"
-version = "0.3.0"
+version = "0.3.1"
 description = "Glass-box autonomous data science: profile, clean, model, and explain every decision."
 readme = "README.md"
 requires-python = ">=3.10"

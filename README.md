@@ -158,6 +158,16 @@ Every run reports the headline metrics against a naive baseline (most-frequent c
 
 The data-quality section calls out constant columns, duplicate rows, high-cardinality categoricals, class imbalance, missing targets, and features that look suspiciously predictive of the target (a simple leakage check). A limitations and next-steps section turns those warnings into concrete actions.
 
+## Dirty data and clear failures
+
+Real tabular data arrives messy, so the run path coerces and validates the data before modeling and records what it did.
+
+- Messy numeric columns. A numeric column written with thousands separators, a currency symbol, or a percent sign is coerced to numeric when most of its non-empty values parse as numbers. Missing tokens that pandas does not treat as missing by default (a double dash, the word `missing`, and a bare `?`) are read as missing. Legitimate categories such as `Unknown`, `None`, and `Other` stay categories and are never turned into missing. Every coercion is written to the decision log.
+- Boolean columns. A boolean column, in true/false, string, or numeric form, is cast to a 0/1 numeric array before imputation, and it is kept out of the outlier check, which has no meaning for a two-value column.
+- Binary metrics for any labels. Precision, recall, f1, and roc_auc work for any pair of labels, not only the integer `1`. Targets labelled `<=50K`/`>50K`, `bad`/`good`, `yes`/`no`, and `1`/`2` are all handled. The positive class is chosen by a deterministic rule, the minority class, since that is usually the event of interest such as stroke, churn, or fraud, and it is recorded in the report.
+- Class-imbalance safety. The train/test split is stratified, the cross-validation fold count is capped at the smallest class count so a five percent positive rate still trains, and a class too small to split and cross-validate stops the run with a clear message rather than a crash.
+- Clear failures. When the library cannot handle the data it raises a `MudraError` that names the offending column and suggests a fix, instead of a raw pandas or scikit-learn traceback. File-read failures raise `IngestError`, a subclass of `MudraError`, so they are caught by the same handling.
+
 ## Stress tested
 
 The pipeline is exercised against a battery of adversarial datasets: a tiny set, a single-feature set, a single-class target, an all-missing column, a constant column, all-duplicate rows, a wide dataset, an id-like high-cardinality feature, a strongly imbalanced target, mixed dtypes with messy datetimes, a leakage-injected dataset where a feature equals the target, a target with missing values, and a 10k-row dataset. All four task variants run: binary and multiclass classification, regression, and clustering.

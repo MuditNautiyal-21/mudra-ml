@@ -3,6 +3,16 @@
 All notable changes to this project are recorded here. The format follows
 Keep a Changelog, and the project uses semantic versioning.
 
+## [0.3.1] - 2026-06-09
+
+### Documentation
+- The README now describes the 0.3.0 robustness improvements: messy-numeric
+  coercion with preserved categories, boolean-column handling, binary
+  classification metrics for any pair of labels with the recorded positive
+  class, class-imbalance safety through a stratified split and capped
+  cross-validation folds, and clear `MudraError` failures that name the
+  offending column. There are no code changes in 0.3.1.
+
 ## [0.3.0] - 2026-06-08
 
 This release makes the pipeline survive dirty, real-world tabular data, or
