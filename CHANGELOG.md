@@ -3,6 +3,58 @@
 All notable changes to this project are recorded here. The format follows
 Keep a Changelog, and the project uses semantic versioning.
 
+## [0.3.0] - 2026-06-08
+
+This release makes the pipeline survive dirty, real-world tabular data, or
+fail with a clear, specific error. It was driven by a battery of messy public
+datasets (Titanic, Adult, credit-g, bank-marketing) and a stroke-prediction
+replica. The dominant failure the battery surfaced was not ingestion but the
+metrics path: a binary target labelled anything other than the integer 1
+crashed the run.
+
+### Fixed
+- Classification metrics now work for any binary labels, not only the integer
+  `1`. Targets labelled `<=50K`/`>50K`, `bad`/`good`, `1`/`2`, `yes`/`no`, and
+  similar previously crashed because precision, recall, and f1 assumed
+  `pos_label=1`. The positive class is now chosen by a deterministic rule (the
+  minority class, since that is usually the event of interest such as stroke,
+  churn, or fraud), recorded in the report, and threaded through precision,
+  recall, f1, and roc_auc. Multiclass behaviour is unchanged.
+- The data-quality outlier check no longer crashes on boolean columns. It was
+  running a quantile on a raw boolean series, which numpy rejects (`numpy
+  boolean subtract`). Boolean columns are skipped (they have no meaningful
+  outliers) and numeric values are cast to float before the quantile.
+- Boolean-dtype feature columns no longer crash the imputer. `BooleanToNumeric`
+  now runs before `SimpleImputer`, casting bool, string, and numeric forms to a
+  0/1 float array and leaving missing entries as NaN, so a raw boolean column is
+  converted to numbers before the imputer, which rejects bool dtype, ever sees
+  it. Mode imputation still fills the missing entries.
+
+### Added
+- Dirty-numeric coercion on the run path. Object columns whose values are
+  numbers wearing thousands separators, currency symbols, or percent signs are
+  coerced to numeric when at least 90 percent of their non-empty values parse.
+  Missing tokens that pandas does not handle by default (`--`, the word
+  `missing`, and a bare `?`) are treated as missing. Legitimate categories such
+  as `Unknown`, `None`, and `Other` are never turned into missing, and the
+  pandas-default tokens (`N/A`, `NA`, `null`, and the rest) are not re-added
+  because pandas already treats them as missing at read time. Every coercion is
+  logged.
+- `MudraError`, with a `DataError` subclass, raised for data the library cannot
+  handle. The public run path is wrapped so that any failure surfaces as a
+  `MudraError` with a message that names the offending column and suggests a
+  fix, never a raw pandas or scikit-learn traceback. A single-class target and a
+  class with too few examples to split and cross-validate both stop with a clear
+  message.
+- The chosen positive class is shown in the report Result section.
+
+### Changed
+- Cross-validation folds are capped at the smallest class count, so a severely
+  imbalanced but modellable target (for example a five percent positive rate)
+  trains without crashing.
+- `IngestError` is now a subclass of `MudraError`, so file-read failures are
+  caught by the same handling as every other library error.
+
 ## [0.2.0] - 2026-06-05
 
 This release overhauls the report and the evaluation so the output earns the

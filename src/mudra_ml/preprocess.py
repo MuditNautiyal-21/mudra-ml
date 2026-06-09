@@ -146,7 +146,10 @@ class BooleanToNumeric(BaseEstimator, TransformerMixin):
         for j in range(arr.shape[1]):
             column = arr[:, j]
             for i, value in enumerate(column):
-                if value is None:
+                # Missing stays missing (NaN) so a following imputer can fill
+                # it with the mode rather than silently forcing it to False.
+                if value is None or (not isinstance(value, str) and pd.isna(value)):
+                    out[i, j] = np.nan
                     continue
                 if isinstance(value, (bool, np.bool_)):
                     out[i, j] = 1.0 if bool(value) else 0.0
@@ -160,6 +163,7 @@ class BooleanToNumeric(BaseEstimator, TransformerMixin):
                 except (TypeError, ValueError):
                     continue
                 if not np.isfinite(numeric):
+                    out[i, j] = np.nan
                     continue
                 out[i, j] = 1.0 if numeric != 0.0 else 0.0
         return out
@@ -238,14 +242,17 @@ def _numeric_pipeline(outlier_strategy: str) -> Pipeline:
 def _boolean_pipeline() -> Pipeline:
     """Discrete pipeline for binary columns.
 
-    Mode imputation fills missing entries with the more common value, then
-    BooleanToNumeric returns a 0/1 float array. No outlier clipping and no
+    BooleanToNumeric casts bool, string, and numeric forms to a 0/1 float
+    array first, leaving missing entries as NaN. It runs before the imputer so
+    a raw boolean-dtype column is converted to numbers before SimpleImputer,
+    which rejects bool dtype, ever sees it. Mode imputation then fills the
+    missing entries with the more common value. No outlier clipping and no
     scaling: those steps collapse skewed binary columns to a constant.
     """
     return Pipeline(
         [
-            ("impute", SimpleImputer(strategy="most_frequent")),
             ("cast", BooleanToNumeric()),
+            ("impute", SimpleImputer(strategy="most_frequent")),
         ]
     )
 

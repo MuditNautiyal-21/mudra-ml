@@ -8,6 +8,7 @@ the output it produces, not the mechanism by which it chooses what to do.
 from __future__ import annotations
 
 from .core import Mudra, RunResult
+from .errors import DataError, MudraError
 from .evaluate import evaluate
 from .goal import Goal, infer_goal
 from .ingest import load
@@ -17,11 +18,13 @@ from .quality import QualityReport, QualityWarning, check_quality
 from .recommend import recommend_models
 from .report import write_report
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "Mudra",
     "RunResult",
+    "MudraError",
+    "DataError",
     "Goal",
     "infer_goal",
     "load",

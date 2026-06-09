@@ -1,6 +1,9 @@
 # Private working notes, never tracked
 .agent/
 
+# Evaluation datasets and generated reports, never tracked
+data_eval/
+
 # Build artifacts
 dist/
 build/

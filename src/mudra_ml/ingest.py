@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import pandas as pd
+
+from .decisions import DecisionLog
+from .errors import MudraError
 
 _CSV_LIKE = {".csv", ".tsv", ".txt"}
 _EXCEL = {".xlsx", ".xls", ".xlsm"}
@@ -15,8 +21,24 @@ _PARQUET = {".parquet", ".pq"}
 
 _ENCODINGS = ("utf-8", "utf-8-sig", "latin-1")
 
+# Missing tokens that pandas does NOT treat as missing by default. The pandas
+# defaults (N/A, NA, n/a, null, none, empty, and more) are already handled at
+# read time, so they are deliberately not repeated here.
+_EXTRA_MISSING_TOKENS = frozenset({"--", "?", "missing"})
 
-class IngestError(Exception):
+# Legitimate category values that must never be turned into missing.
+_PROTECTED_CATEGORIES = frozenset({"unknown", "none", "other"})
+
+# Thousands separators, currency symbols, percent signs, and whitespace are
+# stripped before a numeric parse is attempted.
+_STRIP_PATTERN = re.compile(r"[,$%£€\s]")
+
+# A column is coerced to numeric only when at least this fraction of its
+# non-empty, non-missing-token values parse as numbers after stripping.
+_COERCE_PARSE_THRESHOLD = 0.90
+
+
+class IngestError(MudraError):
     """Raised when a file cannot be read into a DataFrame."""
 
 
@@ -143,4 +165,87 @@ def load(path: str | Path) -> pd.DataFrame:
 
     if frame.empty:
         raise IngestError(f"{path.name} contains no rows.")
+    return frame
+
+
+def _strip_symbols(text: str) -> str:
+    return _STRIP_PATTERN.sub("", text)
+
+
+def _coerce_cell(value: Any) -> Any:
+    """Map one cell to a numeric-ready string or NaN."""
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return np.nan
+    text = str(value).strip()
+    if text.lower() in _EXTRA_MISSING_TOKENS:
+        return np.nan
+    return _strip_symbols(text)
+
+
+def _try_numeric_coercion(series: pd.Series) -> pd.Series | None:
+    """Return a numeric version of a numeric-like object column, or None.
+
+    A column is coerced only when, after dropping the extra missing tokens and
+    stripping separators and symbols, at least 90 percent of the remaining
+    non-empty values parse as numbers. Columns that carry a legitimate
+    ``Unknown``, ``None``, or ``Other`` category are left untouched so those
+    values are never silently turned into missing.
+    """
+    non_null = series.dropna()
+    if non_null.empty:
+        return None
+    stripped_text = non_null.astype(str).str.strip()
+    is_token = stripped_text.str.lower().isin(_EXTRA_MISSING_TOKENS)
+    candidates = stripped_text[~is_token]
+    if candidates.empty:
+        return None
+    parsed = pd.to_numeric(candidates.map(_strip_symbols), errors="coerce")
+    if float(parsed.notna().mean()) < _COERCE_PARSE_THRESHOLD:
+        return None
+    non_parseable = candidates[parsed.isna()]
+    if non_parseable.str.lower().isin(_PROTECTED_CATEGORIES).any():
+        return None
+    return pd.to_numeric(series.map(_coerce_cell), errors="coerce")
+
+
+def coerce_numeric_like(
+    frame: pd.DataFrame, log: DecisionLog | None = None
+) -> pd.DataFrame:
+    """Coerce numeric-like object columns to numeric, logging each coercion.
+
+    Object columns whose values are numbers wearing thousands separators,
+    currency symbols, percent signs, or non-default missing tokens (``--``,
+    ``missing``, a bare ``?``) are read by pandas as text, which breaks the
+    numeric path. This pass repairs them. It is order-independent: every column
+    is judged on its own values, so two runs on the same frame are identical.
+
+    Args:
+        frame: The loaded frame.
+        log: Optional decision log to record each coercion.
+
+    Returns:
+        A new frame with numeric-like columns coerced.
+    """
+    frame = frame.copy()
+    for name in frame.columns:
+        series = frame[name]
+        if not (
+            pd.api.types.is_object_dtype(series)
+            or pd.api.types.is_string_dtype(series)
+        ):
+            continue
+        coerced = _try_numeric_coercion(series)
+        if coerced is None:
+            continue
+        added_missing = int(coerced.isna().sum() - series.isna().sum())
+        frame[name] = coerced
+        if log is not None:
+            log.record(
+                "ingest",
+                f"Column '{name}': coerced to numeric after stripping separators "
+                f"and symbols and treating non-default missing tokens as missing. "
+                f"{added_missing} value(s) set to missing.",
+                "dirty-numeric-coercion",
+                {"column": str(name), "values_set_missing": added_missing},
+            )
     return frame

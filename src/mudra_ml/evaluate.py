@@ -36,6 +36,7 @@ from sklearn.model_selection import RandomizedSearchCV, cross_val_score
 
 from .constants import DEFAULT_CV_FOLDS, DEFAULT_SEARCH_ITER
 from .decisions import DecisionLog
+from .errors import DataError
 from .recommend import Candidate
 
 # Metrics where a larger value is better.
@@ -132,6 +133,7 @@ class EvaluationResult:
     train_set_size: int = 0
     class_labels: list[Any] = field(default_factory=list)
     target_values: list[Any] = field(default_factory=list)
+    positive_label: Any = None
 
     @property
     def best(self) -> CandidateResult:
@@ -157,31 +159,70 @@ class EvaluationResult:
             "train_set_size": self.train_set_size,
             "class_labels": [str(label) for label in self.class_labels],
             "target_values": list(self.target_values),
+            "positive_label": None if self.positive_label is None else str(self.positive_label),
         }
 
 
-def _classification_metrics(
-    y_true: np.ndarray, y_pred: np.ndarray, estimator: Any, X: Any
+def _positive_class(y: np.ndarray, task: str) -> Any:
+    """Pick the positive class for a binary target: the minority class.
+
+    The minority class is the event of interest in most real problems (stroke,
+    churn, fraud), so it is the natural positive class. Ties break on the
+    sorted label, so the choice is deterministic. Returns None for regression
+    or for any target that is not exactly two classes, where no single
+    positive class applies and weighted averaging is used instead.
+    """
+    if task != "classification":
+        return None
+    labels, counts = np.unique(np.asarray(y), return_counts=True)
+    if len(labels) != 2:
+        return None
+    # lexsort uses the last key as primary: rank by count, tie-break by label.
+    order = np.lexsort((labels, counts))
+    return labels[order[0]]
+
+
+def _prf_metrics(
+    y_true: np.ndarray, y_pred: np.ndarray, average: str, pos_label: Any
 ) -> dict[str, float]:
-    average = "binary" if len(np.unique(y_true)) == 2 else "weighted"
-    try:
-        binary_f1 = float(f1_score(y_true, y_pred, average=average, zero_division=0))
-    except ValueError:
-        # Falls back when the binary case has only one class in y_true.
-        binary_f1 = float(f1_score(y_true, y_pred, average="weighted", zero_division=0))
-    metrics: dict[str, Any] = {
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "f1": binary_f1,
-        "precision": float(precision_score(y_true, y_pred, average=average, zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, average=average, zero_division=0)),
+    kw: dict[str, Any] = {"average": average, "zero_division": 0}
+    if average == "binary":
+        kw["pos_label"] = pos_label
+    return {
+        "f1": float(f1_score(y_true, y_pred, **kw)),
+        "precision": float(precision_score(y_true, y_pred, **kw)),
+        "recall": float(recall_score(y_true, y_pred, **kw)),
     }
+
+
+def _classification_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    estimator: Any,
+    X: Any,
+    positive_label: Any = None,
+) -> dict[str, float]:
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    if positive_label is not None:
+        try:
+            core = _prf_metrics(y_true, y_pred, "binary", positive_label)
+        except ValueError:
+            # Falls back when only one class is present in this split.
+            core = _prf_metrics(y_true, y_pred, "weighted", None)
+    else:
+        core = _prf_metrics(y_true, y_pred, "weighted", None)
+    metrics: dict[str, Any] = {"accuracy": float(accuracy_score(y_true, y_pred)), **core}
     metrics["confusion_matrix"] = _confusion_matrix(y_true, y_pred)
     try:
         if hasattr(estimator, "predict_proba"):
             proba = estimator.predict_proba(X)
-            if proba.shape[1] == 2:
-                metrics["roc_auc"] = float(roc_auc_score(y_true, proba[:, 1]))
-            else:
+            if positive_label is not None and proba.shape[1] == 2:
+                pos_idx = list(estimator.classes_).index(positive_label)
+                y_bin = (y_true == positive_label).astype(int)
+                if len(np.unique(y_bin)) == 2:
+                    metrics["roc_auc"] = float(roc_auc_score(y_bin, proba[:, pos_idx]))
+            elif positive_label is None:
                 metrics["roc_auc"] = float(
                     roc_auc_score(y_true, proba, multi_class="ovr", average="weighted")
                 )
@@ -407,6 +448,7 @@ def _baseline(
     y_test: np.ndarray,
     random_state: int,
     log: DecisionLog,
+    positive_label: Any = None,
 ) -> tuple[str, dict[str, float]]:
     """Score a naive baseline so the headline metric has a reference."""
     if task == "classification":
@@ -429,7 +471,7 @@ def _baseline(
         )
         return name, {}
     if task == "classification":
-        metrics = _classification_metrics(y_test, y_pred, estimator, X_test)
+        metrics = _classification_metrics(y_test, y_pred, estimator, X_test, positive_label)
     else:
         metrics = _regression_metrics(y_test, y_pred)
     log.record(
@@ -465,7 +507,10 @@ def _per_class_report(
 
 
 def _roc_pr_curves(
-    estimator: Any, X_test: np.ndarray, y_test: np.ndarray
+    estimator: Any,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    positive_label: Any = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """ROC and PR curve points for binary classifiers with predict_proba."""
     labels = np.unique(y_test)
@@ -475,11 +520,19 @@ def _roc_pr_curves(
         proba = estimator.predict_proba(X_test)
         if proba.shape[1] != 2:
             return {}, {}
-        positive = proba[:, 1]
-        fpr, tpr, _ = roc_curve(y_test, positive)
-        auc_value = float(roc_auc_score(y_test, positive))
-        precision, recall, _ = precision_recall_curve(y_test, positive)
-        ap = float(average_precision_score(y_test, positive))
+        classes = list(estimator.classes_)
+        if positive_label is not None and positive_label in classes:
+            pos_label = positive_label
+            pos_idx = classes.index(positive_label)
+        else:
+            pos_label = classes[1]
+            pos_idx = 1
+        positive = proba[:, pos_idx]
+        y_bin = (np.asarray(y_test) == pos_label).astype(int)
+        fpr, tpr, _ = roc_curve(y_test, positive, pos_label=pos_label)
+        auc_value = float(roc_auc_score(y_bin, positive))
+        precision, recall, _ = precision_recall_curve(y_test, positive, pos_label=pos_label)
+        ap = float(average_precision_score(y_bin, positive))
     except (ValueError, AttributeError):
         return {}, {}
     return (
@@ -542,7 +595,39 @@ def evaluate_supervised(
     """
     log = log if log is not None else DecisionLog()
     scoring = _SKLEARN_SCORING.get(metric, "accuracy" if task == "classification" else "r2")
-    effective_cv = max(2, min(cv, _min_class_count(y_train, task)))
+    min_class = _min_class_count(y_train, task)
+    if task == "classification" and min_class < 2:
+        raise DataError(
+            "The rarest class has too few examples in the training split to "
+            "cross-validate. Collect more examples of the minority class before "
+            "training."
+        )
+    # Cap folds at the smallest class count so cross-validation never asks for
+    # more folds than the rarest class can fill.
+    effective_cv = max(2, min(cv, min_class))
+    if task == "classification" and effective_cv < cv:
+        log.record(
+            "evaluate",
+            f"Cross-validation folds capped at {effective_cv} (the smallest "
+            f"class has {min_class} examples in the training split).",
+            "cv-folds-capped-by-class",
+            {"folds": effective_cv, "min_class": min_class},
+        )
+
+    # The positive class for a binary target is the minority class. It is
+    # determined from the training labels only and threaded through every
+    # metric so precision, recall, f1, and roc_auc work for any labels, not
+    # only the integer 1. None for regression and multiclass.
+    positive_label = _positive_class(y_train, task)
+    if positive_label is not None:
+        log.record(
+            "evaluate",
+            f"Positive class set to '{positive_label}' (the minority class) for "
+            f"binary metrics. Precision, recall, f1, and roc_auc are computed "
+            f"against this class.",
+            "positive-class-minority",
+            {"positive_label": str(positive_label)},
+        )
 
     # Phase 1: tune and cross-validate every candidate. No test-set scoring
     # happens here. The test set must not influence selection.
@@ -582,9 +667,11 @@ def evaluate_supervised(
     # Phase 3: score the held-out test set once, only for the selected model.
     test_pred = best.estimator.predict(X_test)
     if task == "classification":
-        test_metrics = _classification_metrics(y_test, test_pred, best.estimator, X_test)
+        test_metrics = _classification_metrics(
+            y_test, test_pred, best.estimator, X_test, positive_label
+        )
         train_metrics = _classification_metrics(
-            y_train, best.estimator.predict(X_train), best.estimator, X_train
+            y_train, best.estimator.predict(X_train), best.estimator, X_train, positive_label
         )
     else:
         test_metrics = _regression_metrics(y_test, test_pred)
@@ -604,7 +691,7 @@ def evaluate_supervised(
     )
 
     baseline_name, baseline_metrics = _baseline(
-        task, X_train, y_train, X_test, y_test, random_state, log
+        task, X_train, y_train, X_test, y_test, random_state, log, positive_label
     )
     if baseline_metrics and metric in baseline_metrics:
         gap = float(best.test_metrics.get(metric, 0.0)) - float(baseline_metrics[metric])
@@ -628,7 +715,7 @@ def evaluate_supervised(
 
     if task == "classification":
         per_class = _per_class_report(y_test, best.estimator.predict(X_test))
-        roc, pr = _roc_pr_curves(best.estimator, X_test, y_test)
+        roc, pr = _roc_pr_curves(best.estimator, X_test, y_test, positive_label)
         diagnostics: dict[str, Any] = {}
         class_labels: list[Any] = list(np.unique(y_test).tolist())
         target_values: list[Any] = [str(v) for v in y_test.tolist()]
@@ -659,6 +746,7 @@ def evaluate_supervised(
         train_set_size=train_size,
         class_labels=class_labels,
         target_values=target_values,
+        positive_label=positive_label,
     )
 
 

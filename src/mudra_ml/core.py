@@ -13,9 +13,10 @@ from sklearn.model_selection import train_test_split
 
 from .constants import DEFAULT_RANDOM_STATE
 from .decisions import DecisionLog, configure_logging
+from .errors import DataError, MudraError
 from .evaluate import evaluate
 from .goal import Goal, infer_goal
-from .ingest import load
+from .ingest import coerce_numeric_like, load
 from .preprocess import build_pipeline
 from .profile import DataProfile, DataProfiler
 from .quality import check_quality
@@ -131,9 +132,42 @@ class Mudra:
 
         Returns:
             A RunResult with the fitted model and the report path.
+
+        Raises:
+            MudraError: If the data cannot be handled. The message names the
+                offending column, states the problem, and suggests a fix. No
+                raw pandas or scikit-learn traceback reaches the caller.
         """
+        try:
+            return self._execute(
+                data, target, task, metric, constraints, report_path, html, use_boost
+            )
+        except MudraError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise MudraError(
+                f"MudraML could not complete the run: {exc}. Check the target "
+                f"column and the column types, then try again."
+            ) from exc
+
+    def _execute(
+        self,
+        data: str | Path | pd.DataFrame,
+        target: str | None,
+        task: str | None,
+        metric: str | None,
+        constraints: dict[str, Any] | None,
+        report_path: str | Path,
+        html: bool,
+        use_boost: bool,
+    ) -> RunResult:
+        """Run the pipeline. Wrapped by run() so failures surface as MudraError."""
         frame, dataset_name = self._as_frame(data)
         self.log = DecisionLog()
+
+        # Repair numeric-like columns read as text (dirty tokens, separators,
+        # currency, percent) before profiling sees them.
+        frame = coerce_numeric_like(frame, self.log)
 
         profiler = DataProfiler(self.log)
         profile = profiler.profile(frame)
@@ -151,6 +185,9 @@ class Mudra:
         assert goal.task is not None and goal.metric is not None
 
         quality = check_quality(frame, profile, goal.target, goal.task, self.log)
+
+        if goal.task == "classification" and goal.target is not None:
+            self._check_classification_feasible(frame, goal.target)
 
         if goal.task == "clustering":
             evaluation = self._run_clustering(frame, profile, goal)
@@ -291,6 +328,32 @@ class Mudra:
         importance: dict[str, float], feature_names: list[str]
     ) -> dict[str, float]:
         return importance
+
+    @staticmethod
+    def _check_classification_feasible(frame: pd.DataFrame, target: str) -> None:
+        """Stop with a clear message when a target cannot be classified.
+
+        A single-class target cannot train a classifier, and a class with a
+        single example cannot be put on both sides of a split or into
+        cross-validation. Both raise a DataError naming the target rather than
+        letting scikit-learn raise a bare traceback.
+        """
+        counts = frame[target].dropna().value_counts()
+        if len(counts) < 2:
+            only = counts.index[0] if len(counts) else "none"
+            raise DataError(
+                f"Target '{target}' has only one class ('{only}'). A classifier "
+                f"needs at least two classes. Add rows for the other class or "
+                f"reframe the problem."
+            )
+        rarest_label = counts.index[-1]
+        rarest = int(counts.iloc[-1])
+        if rarest < 2:
+            raise DataError(
+                f"Target '{target}' has a class ('{rarest_label}') with only "
+                f"{rarest} example. That is too few to split and cross-validate. "
+                f"Collect more examples of that class or merge it into another."
+            )
 
     @staticmethod
     def _as_frame(data: str | Path | pd.DataFrame) -> tuple[pd.DataFrame, str]:

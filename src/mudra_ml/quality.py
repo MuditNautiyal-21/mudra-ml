@@ -20,7 +20,6 @@ from .constants import (
 )
 from .decisions import DecisionLog
 from .profile import (
-    BOOLEAN,
     CATEGORICAL,
     ID,
     NUMERIC,
@@ -102,6 +101,9 @@ def _outlier_counts(series: pd.Series) -> int:
     values = pd.to_numeric(series, errors="coerce").dropna()
     if values.empty:
         return 0
+    # Cast to float so the quantile interpolation is safe: numpy cannot
+    # subtract booleans, and pd.to_numeric leaves a bool column as bool.
+    values = values.astype(float)
     q1 = values.quantile(0.25)
     q3 = values.quantile(0.75)
     iqr = q3 - q1
@@ -227,7 +229,9 @@ def _outlier_table(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for col in profile.columns.values():
-        if col.inferred_type not in (NUMERIC, BOOLEAN):
+        # Boolean columns have only two values and no meaningful outliers, and
+        # a raw bool series breaks the quantile computation. Skip them.
+        if col.inferred_type != NUMERIC:
             continue
         if col.name not in frame.columns:
             continue

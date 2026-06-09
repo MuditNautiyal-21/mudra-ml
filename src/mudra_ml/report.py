@@ -61,6 +61,7 @@ class ReportContext:
     charts: dict[str, str] = field(default_factory=dict)
     overfitting_gap: dict[str, float] = field(default_factory=dict)
     regression_diag: dict[str, Any] = field(default_factory=dict)
+    positive_label: str | None = None
 
 
 def _format_value(value: Any, fmt: str = "%.4f") -> str:
@@ -115,7 +116,8 @@ Train vs test gap on selected metrics (positive means train is better than test)
 ## Result
 
 Selected model: {{ ctx.best_name }}
-Cross-validation score: {{ fmt(ctx.cv_mean) }} +/- {{ fmt(ctx.cv_std) }}
+{% if ctx.positive_label is not none %}Positive class (for precision, recall, f1, roc_auc): {{ ctx.positive_label }} (the minority class).
+{% endif %}Cross-validation score: {{ fmt(ctx.cv_mean) }} +/- {{ fmt(ctx.cv_std) }}
 
 Held-out metrics:
 
@@ -272,7 +274,8 @@ Rows: {{ ctx.n_rows }} &nbsp; Columns: {{ ctx.n_columns }}</p>
 
 <h2>Result</h2>
 <p>Selected model: <span class="metric">{{ ctx.best_name }}</span><br>
-Cross-validation score: {{ fmt(ctx.cv_mean) }} &plusmn; {{ fmt(ctx.cv_std) }}</p>
+{% if ctx.positive_label is not none %}Positive class (for precision, recall, f1, roc_auc): <span class="metric">{{ ctx.positive_label }}</span> (the minority class).<br>
+{% endif %}Cross-validation score: {{ fmt(ctx.cv_mean) }} &plusmn; {{ fmt(ctx.cv_std) }}</p>
 <ul>
 {% for name, value in ctx.test_metrics.items() %}{% if name != "confusion_matrix" %}<li>{{ name }}: {{ fmt(value) }}</li>{% endif %}{% endfor %}
 </ul>
@@ -640,4 +643,5 @@ def build_context(
         charts=charts,
         overfitting_gap=overfitting_gap,
         regression_diag=evaluation.get("regression_diagnostics", {}) or {},
+        positive_label=evaluation.get("positive_label"),
     )
