@@ -1,17 +1,15 @@
 # Mudra-ML
 
-Automated, glass-box data science. Point it at a data file, get a fitted model and a report of every decision behind it.
+Point it at a table of data. It cleans the data, trains several models, picks the best one, and writes a report that explains every choice it made.
 
 [![PyPI version](https://img.shields.io/pypi/v/mudra-ml.svg?v=1)](https://pypi.org/project/mudra-ml/)
 [![Python versions](https://img.shields.io/pypi/pyversions/mudra-ml.svg?v=1)](https://pypi.org/project/mudra-ml/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/MuditNautiyal-21/mudra-ml/actions/workflows/ci.yml/badge.svg)](https://github.com/MuditNautiyal-21/mudra-ml/actions/workflows/ci.yml)
 
-MudraML automates the common data science workflow and shows its work. You point it at a data file, optionally state a goal, and it ingests the data, profiles it, cleans it, picks an algorithm, trains and tunes a shortlist of models, evaluates them, and returns the best fitted model together with a report of every decision it made and the rule behind that decision.
+## What it does
 
-The point of difference is the decision engine. It is rule-based and statistical, not another model. Outlier handling uses IQR or z-score rules. Missing values are filled by median, mode, or a constant, or the column is dropped past a missingness threshold. The algorithm shortlist comes from a documented rule set keyed on the task, the dataset size, the feature count, and your constraints. Every one of those choices is written into the report, so a person can read why the pipeline did what it did and disagree with it if they want.
-
-This is the glass-box position: the models are the product, and the way the pipeline reaches them is auditable rather than hidden inside a search.
+Mudra-ML automates the routine part of supervised machine learning on tables: reading the file, working out what each column holds, repairing messy values, splitting the data safely, choosing which algorithms to try, tuning them, and measuring the winner on data it never saw during training. Every one of those choices follows a written rule, and every rule that fired is logged and printed in the report. Nothing is decided by a hidden model, and the library never calls the network.
 
 ## Install
 
@@ -23,158 +21,153 @@ Optional extras:
 
 ```
 pip install mudra-ml[files]    # parquet and excel readers
-pip install mudra-ml[boost]    # xgboost and lightgbm candidates
+pip install mudra-ml[boost]    # xgboost, lightgbm, and catboost candidates
 ```
 
-The library runs fully on the scikit-learn core. The boosters are added to the shortlist only when the extra is installed.
+The base install runs fully on scikit-learn. The boosting libraries join the candidate list only when they are installed. A missing one is skipped with a note in the log, never an error.
 
 ## Quickstart
-
-Fully automatic. MudraML infers the task, the target, and the metric:
 
 ```python
 from mudra_ml import Mudra
 
 m = Mudra()
 result = m.run("data.csv")
-print(result.report_path)   # markdown and HTML report on disk
-model = result.best_model   # fitted, ready to predict
+
+print(result.task)          # what it decided to do
+print(result.metrics)       # how well the chosen model did
+print(result.report_path)   # the full explanation, on disk
 ```
 
-Operator-defined goal. You set what you care about and MudraML honors it:
+That is the whole loop. `run` accepts a file path (csv, tsv, excel, json, or parquet) or a pandas DataFrame. If you do not name a target column, it looks for a plausible one and tells you what it picked. The report lands next to your script as markdown and HTML.
+
+## Classification
+
+Classification predicts a label, such as whether a customer leaves or stays. Name the column you want predicted:
 
 ```python
-result = m.run(
+result = Mudra().run("churn.csv", target="churned")
+
+print(result.metrics["f1"])
+print(result.positive_label)   # the class treated as the event of interest
+```
+
+For a two-class target the minority class is treated as the positive class, because the rarer outcome (the churn, the fraud, the diagnosis) is usually the one you care about. The report records this choice.
+
+## Regression
+
+Regression predicts a number, such as a price:
+
+```python
+result = Mudra().run("houses.csv", target="price")
+
+print(result.metrics["rmse"])   # typical size of the prediction error
+print(result.metrics["r2"])     # share of variation the model explains
+```
+
+## Clustering
+
+Clustering groups similar rows when there is nothing to predict:
+
+```python
+result = Mudra().run("customers.csv", task="clustering")
+
+labels = result.predict(my_dataframe)   # cluster id per row
+```
+
+## Steering the run
+
+You can set as much or as little as you want. Anything you do not set is inferred and the report says so.
+
+```python
+result = Mudra(random_state=7).run(
     "churn.csv",
-    target="churn",
+    target="churned",
     task="classification",
     metric="f1",
     constraints={"interpretable": True, "max_train_seconds": 120},
 )
 ```
 
-When `interpretable` is set, the shortlist is limited to models you can read directly, such as logistic regression and a single decision tree. The report states which goal fields you set and which ones were inferred.
+With `interpretable` set, only models a person can read directly are trained, such as logistic regression and a small decision tree.
 
-## What the report looks like
+## What data it accepts
 
-Every run writes a markdown report and an HTML report. The HTML report carries the same content plus diagnostic charts (confusion matrix heatmap, ROC and precision-recall curves, target distribution, feature correlation, residual and predicted-versus-actual plots for regression). The block below is an excerpt from a real run on the scikit-learn breast cancer dataset.
+Tables. One row per example, one column per attribute, with a header row. Numeric, categorical, boolean, date, text, and id columns are all recognized and handled. Messy values that real exports produce are repaired on the way in:
 
-```
-## Trust summary
+- Numbers written as text, with thousands separators, currency symbols, or percent signs, are parsed back to numbers.
+- Missing-value spellings that pandas does not catch (`--`, `?`, the word `missing`) are treated as missing. Real categories such as `Unknown` or `Other` are left alone.
+- Booleans written as `yes`/`no`, `true`/`false`, `t`/`f`, or 0/1 all work.
+- Dates are expanded into year, month, day, and weekday features.
+- Id columns carry no signal and are dropped.
 
-Held-out test size: 114 rows. Training size: 455 rows.
-Baseline: dummy_most_frequent (no learning, predicts the most frequent class or the mean).
+Data the library cannot handle stops the run with a `MudraError` that names the column, states the problem, and suggests a fix. You never see a raw pandas or scikit-learn traceback.
 
-| Metric    | Best model | Baseline | Difference |
-| --------- | ---------- | -------- | ---------- |
-| accuracy  | 0.9737     | 0.6316   | 0.3421     |
-| f1        | 0.9793     | 0.7742   | 0.2051     |
-| precision | 0.9726     | 0.6316   | 0.3410     |
-| recall    | 0.9861     | 1.0000   | -0.0139    |
-| roc_auc   | 0.9970     | 0.5000   | 0.4970     |
+## What happens at each step
 
-Train vs test gap on selected metrics (positive means train is better than test).
+1. Ingest. The file is read. Delimiter, encoding, and header row are detected.
+2. Profile. Each column gets a type (numeric, categorical, boolean, date, text, id) by rule.
+3. Goal. Target, task, and metric are taken from you or inferred, in that order of priority.
+4. Quality. Constant columns, duplicate rows, class imbalance, and features that look leaked from the target are flagged.
+5. Preprocess. Imputation, outlier clipping, encoding, and scaling are fitted on the training split only, so nothing from the test split can leak into the model.
+6. Recommend. A documented rule set picks a small shortlist of algorithms that fit the task, the dataset size, the dimensionality, and the sparsity. It never runs every model on every dataset.
+7. Tune and select. Each shortlisted model is tuned with a fixed-seed randomized search. The best is chosen by cross-validation alone. The held-out test set is scored once, for the winner, for reporting only.
+8. Report. Markdown and HTML, listing every decision and the rule that produced it.
 
-| Metric    | Train  | Test   | Gap    |
-| --------- | ------ | ------ | ------ |
-| accuracy  | 0.9846 | 0.9737 | 0.0109 |
-| f1        | 0.9878 | 0.9793 | 0.0085 |
-| precision | 0.9793 | 0.9726 | 0.0067 |
-| recall    | 0.9965 | 0.9861 | 0.0104 |
+## Models it can train
 
-## Result
+Classification: logistic regression, decision tree, random forest, extra trees, gradient boosting, support vector classifier, k-nearest neighbors, and gaussian naive bayes. Regression: linear regression, ridge, elastic net, decision tree, random forest, extra trees, gradient boosting, support vector regressor, and k-nearest neighbors. Clustering: k-means with a swept cluster count. XGBoost, LightGBM, and CatBoost join the shortlist when the `boost` extra is installed.
 
-Selected model: logistic_regression
-Cross-validation score: 0.9801 +/- 0.0129
+Which of these actually run depends on your data. For example, k-nearest neighbors is only tried when the feature count is modest and the data is dense, and kernel models are only tried when the row count keeps their cost reasonable. The report states which models were shortlisted and why.
 
-### Per-class report
-
-| Class | Precision | Recall | F1     | Support |
-| ----- | --------- | ------ | ------ | ------- |
-| 0     | 0.9756    | 0.9524 | 0.9639 | 42      |
-| 1     | 0.9726    | 0.9861 | 0.9793 | 72      |
-
-## Feature importance (permutation, mean across 10 repeats)
-
-Impurity importance is biased toward high-cardinality features. The permutation view is more reliable because it scores each feature by how much shuffling it hurts the model.
-
-- worst smoothness: 0.0193 (+/- 0.0102)
-- worst texture: 0.0175 (+/- 0.0111)
-- area error: 0.0149 (+/- 0.0111)
-- worst concave points: 0.0114 (+/- 0.0056)
-- mean smoothness: 0.0105 (+/- 0.0086)
-```
-
-The numbers above come from a real run. The HTML report adds confusion matrix, ROC, and precision-recall charts alongside these tables.
-
-## Predict and reuse
+## Save, load, and predict on new data
 
 ```python
-result.save("run_artifact")            # pipeline + model + metadata
-loaded = Mudra.load("run_artifact")
-preds = loaded.predict(new_dataframe)
+result = Mudra().run("churn.csv", target="churned")
+
+path = result.save("churn_model")        # writes churn_model.joblib + churn_model.json
+loaded = Mudra.load("churn_model")       # restores the exact model
+
+preds = loaded.predict(new_dataframe)          # labels
+probs = loaded.predict_proba(new_dataframe)    # class probabilities
 ```
 
-The preprocessing pipeline travels with the model, so new rows are transformed the same way the training rows were.
+A saved then loaded model gives predictions identical to the original. The `.json` file next to the model records the library version, python version, creation date, task, target, metric, selected model, seed, positive class, and the input schema.
+
+New data is checked against that schema before prediction. A missing column, an unexpected column, a column whose type changed, or a category the model never saw all raise a clear `MudraError` instead of returning silently wrong numbers.
+
+The result object has a stable surface you can build on: `best_model`, `pipeline`, `metrics`, `report_path`, `task`, `target`, `feature_names`, `positive_label`, and `model_path`.
+
+## The decision report
+
+The report is the product as much as the model is. Open `result.report_path` (markdown) or the `.html` file next to it. It contains the goal and which parts of it were inferred, the full decision log by stage, the data-quality findings, every candidate model with its cross-validation score, the winner's held-out metrics next to a naive baseline, the train-versus-test gap, per-class breakdowns and curves for classification, residual diagnostics for regression, and feature importance with its uncertainty.
+
+## Determinism
+
+One seed is threaded through the split, the search, the estimators, and any sampling. Two runs on the same input produce the same model, the same numbers, and byte-identical reports. Set the seed with `Mudra(random_state=...)`.
 
 ## Command line
 
 ```
-mudra-ml run data.csv --target churn --task classification --metric f1
+mudra-ml run data.csv --target churn --metric f1 --save churn_model
 mudra-ml profile data.csv
 ```
 
-`run` writes the report and prints the selected model and its held-out metrics. `profile` prints the inferred column types, missingness, cardinality, and the candidate target columns.
-
-## What it does, stage by stage
-
-1. Ingest. Readers for csv, tsv, excel, json, and parquet. For delimited text the delimiter, encoding, and header row are detected.
-2. Profile. Per-column type inference (numeric, categorical, datetime, boolean, id, text), missingness, cardinality, distribution stats, and candidate-target ranking.
-3. Goal. Rule-based inference of the task, target, and metric, with any field you set taking precedence.
-4. Preprocess. A leakage-safe scikit-learn Pipeline and ColumnTransformer. Imputation, datetime part extraction, outlier clipping, encoding, and scaling are all fit on the training split only.
-5. Recommend. A documented rule set returns a candidate shortlist.
-6. Train and evaluate. Cross-validated training and tuning with RandomizedSearchCV at a fixed seed. Model selection follows the cross-validation score, so the held-out test set is scored only once, for the selected model, and never used to choose among candidates. Feature importance is reported where the model exposes it.
-7. Report. Markdown and HTML that log every decision and the rule that produced it.
-
-## Why leakage safety matters here
-
-Every statistic that preprocessing needs (a median, a category frequency, an outlier bound, a scaler mean) is learned during `fit`. MudraML fits the pipeline on the training split and only transforms the test split. No information from the test data reaches the model through preprocessing. The test suite checks this property directly: it fits on a slice with a known mean and confirms the learned imputation value matches the train slice rather than the whole dataset.
-
-## Determinism
-
-One `random_state` is threaded through every stochastic step (the split, the search, the estimators) and defaults to a fixed value. Two runs on the same data and the same goal produce the same result and the same report.
-
-## Tasks and metrics
-
-| Task | Default metric | Also reported |
-| --- | --- | --- |
-| classification | f1 | accuracy, precision, recall, roc_auc, per-class precision/recall/f1, confusion matrix, ROC and precision-recall curves |
-| regression | rmse | mae, mse, r2, residual mean and std, predicted vs actual |
-| clustering | silhouette | davies_bouldin |
-
-## Trust and data quality
-
-Every run reports the headline metrics against a naive baseline (most-frequent class for classification, mean for regression), the cross-validation score as mean plus or minus standard deviation across folds, and the train versus test gap so that overfitting is visible. When the held-out set is below 50 rows the metrics are labeled indicative only. Permutation importance with its standard deviation is reported alongside impurity importance, with a note that impurity importance is biased toward high-cardinality features.
-
-The data-quality section calls out constant columns, duplicate rows, high-cardinality categoricals, class imbalance, missing targets, and features that look suspiciously predictive of the target (a simple leakage check). A limitations and next-steps section turns those warnings into concrete actions.
-
-## Dirty data and clear failures
-
-Real tabular data arrives messy, so the run path coerces and validates the data before modeling and records what it did.
-
-- Messy numeric columns. A numeric column written with thousands separators, a currency symbol, or a percent sign is coerced to numeric when most of its non-empty values parse as numbers. Missing tokens that pandas does not treat as missing by default (a double dash, the word `missing`, and a bare `?`) are read as missing. Legitimate categories such as `Unknown`, `None`, and `Other` stay categories and are never turned into missing. Every coercion is written to the decision log.
-- Boolean columns. A boolean column, in true/false, string, or numeric form, is cast to a 0/1 numeric array before imputation, and it is kept out of the outlier check, which has no meaning for a two-value column.
-- Binary metrics for any labels. Precision, recall, f1, and roc_auc work for any pair of labels, not only the integer `1`. Targets labelled `<=50K`/`>50K`, `bad`/`good`, `yes`/`no`, and `1`/`2` are all handled. The positive class is chosen by a deterministic rule, the minority class, since that is usually the event of interest such as stroke, churn, or fraud, and it is recorded in the report.
-- Class-imbalance safety. The train/test split is stratified, the cross-validation fold count is capped at the smallest class count so a five percent positive rate still trains, and a class too small to split and cross-validate stops the run with a clear message rather than a crash.
-- Clear failures. When the library cannot handle the data it raises a `MudraError` that names the offending column and suggests a fix, instead of a raw pandas or scikit-learn traceback. File-read failures raise `IngestError`, a subclass of `MudraError`, so they are caught by the same handling.
-
-## Stress tested
-
-The pipeline is exercised against a battery of adversarial datasets: a tiny set, a single-feature set, a single-class target, an all-missing column, a constant column, all-duplicate rows, a wide dataset, an id-like high-cardinality feature, a strongly imbalanced target, mixed dtypes with messy datetimes, a leakage-injected dataset where a feature equals the target, a target with missing values, and a 10k-row dataset. All four task variants run: binary and multiclass classification, regression, and clustering.
+`run` trains and writes the report. `profile` prints the inferred column types, missingness, cardinality, and candidate targets without training anything.
 
 ## Scope
 
-This release covers the supervised classification and regression cases and KMeans clustering, end to end, with the decision log and the report. Deep text modeling, time series, model-based imputation, and a search beyond curated grids are out of scope by design, since the engine is meant to stay explainable. See the changelog for the version history.
+Mudra-ML is built for tabular data that fits in memory: the everyday spreadsheet, database extract, or csv export with up to a few hundred thousand rows. It covers binary and multiclass classification, regression, and k-means clustering, end to end, with an audit trail.
+
+## Limits
+
+Know what it does not do, and when not to use it:
+
+- No deep learning. Images, audio, and video are out of scope.
+- Text columns are reduced to simple length features. For real language understanding, use a dedicated text pipeline.
+- No time-series forecasting. The random split assumes rows are exchangeable, which time series are not.
+- Data larger than memory is not supported.
+- Do not use the output for decisions that affect people (credit, hiring, medical, legal) without a person reviewing the report, the data quality findings, and the limits of the data. The report flags many problems, and it cannot flag them all.
 
 ## License
 

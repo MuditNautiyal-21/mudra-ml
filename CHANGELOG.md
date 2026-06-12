@@ -3,6 +3,79 @@
 All notable changes to this project are recorded here. The format follows
 Keep a Changelog, and the project uses semantic versioning.
 
+## [0.4.0] - 2026-06-11
+
+This release widens the algorithm roster, adds the pieces production use
+needs (a stable result surface, a complete saved artifact, schema-validated
+prediction), proves the pipeline against a task-by-condition evaluation
+battery, and rewrites the README for a reader new to the field.
+
+### Added
+- New classification candidates: support vector classifier, k-nearest
+  neighbors, gaussian naive bayes, and extra trees. New regression
+  candidates: support vector regressor, k-nearest neighbors, extra trees,
+  and elastic net. Each carries a curated tuning grid and joins the
+  shortlist through a documented rule keyed on task, dataset size,
+  dimensionality, and sparsity: kernel models when the row count keeps
+  their cost affordable, k-nearest neighbors only on low-dimensional dense
+  data, extra trees alongside the other ensembles on medium datasets, and
+  gaussian naive bayes or elastic net on wide data where features
+  outnumber rows. Every inclusion and exclusion is logged. The shortlist
+  stays small; no dataset runs every model.
+- CatBoost as a third optional booster next to XGBoost and LightGBM. All
+  three are imported lazily through the `boost` extra. A missing library is
+  skipped with a logged note and never fails the run.
+- `predict_proba` on the result object, returning class probabilities for
+  classification models.
+- Schema validation at prediction time. The input schema (column names,
+  types, the target, the feature columns, and the categories seen during
+  training) is captured at training time and enforced on new data. Missing
+  columns, unexpected columns, changed types, and unseen categories raise a
+  clear `SchemaError` (a `MudraError` subclass) naming the column, instead
+  of a raw traceback or a silently wrong prediction. Numeric columns that
+  arrive as text with separators or currency symbols are repaired at
+  prediction time the same way they are repaired at training time.
+- A complete saved artifact. `save` now writes the fitted pipeline and
+  model to a `.joblib` file plus a human-readable `.json` metadata file
+  recording the library version, python version, created date, task,
+  target, metric, selected model, seed, positive class, and the input
+  schema. `Mudra.load` restores the model and produces predictions
+  identical to the saved one, which a test asserts.
+- New stable fields on the result object: `target`, `positive_label`,
+  `metrics` (the selected model's held-out metrics), `input_schema`, and
+  `model_path`. The stable surface is now `best_model`, `pipeline`,
+  `metrics`, `report_path`, `task`, `target`, `feature_names`,
+  `positive_label`, and `model_path`.
+- An evaluation battery crossing every task type (binary, multiclass,
+  regression, clustering) with fourteen data conditions (clean, dirty
+  numeric, missing-heavy, imbalanced, high-cardinality, wide, tiny, mixed
+  types, boolean, datetime, id columns, duplicate rows, constant columns,
+  and a planted leakage column). All 53 applicable cells run the full
+  pipeline end to end and pass, and the planted leak is flagged by the
+  quality stage. The battery datasets are deterministic and synthetic so
+  the suite runs offline and reproduces exactly.
+- A determinism test asserting that two runs on the same input, including
+  a dirty mixed dataset, produce identical results and byte-identical
+  markdown and HTML reports.
+
+### Changed
+- The recommendation rules now consider the sparsity of the transformed
+  feature matrix, and the tight-time-budget rule drops the kernel models
+  along with gradient boosting.
+- The README is rewritten for a beginner-to-mid reader: what the library
+  does, a quickstart, one short example per task, what data it accepts,
+  what happens at each step, save and load and predict, scope, and limits.
+
+### Fixed
+- Random forest and extra trees now run single-threaded. Their parallel
+  predict path adds tree outputs in thread completion order, and float
+  addition is not associative, so repeated predictions could differ in the
+  last bits and break the determinism guarantee. The tuning search still
+  parallelizes across configurations, and a test now asserts repeated
+  forest predictions are bit-identical.
+- Predictions on loaded artifacts from earlier releases still work; they
+  skip schema validation because no schema was stored.
+
 ## [0.3.1] - 2026-06-09
 
 ### Documentation

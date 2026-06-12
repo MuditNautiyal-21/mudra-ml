@@ -19,3 +19,11 @@ class DataError(MudraError):
     single-class target or a class with too few examples to split and
     cross-validate.
     """
+
+
+class SchemaError(MudraError):
+    """New data does not match the schema the model was trained on.
+
+    Raised at prediction time for missing columns, unexpected columns,
+    changed column types, and unseen categories.
+    """

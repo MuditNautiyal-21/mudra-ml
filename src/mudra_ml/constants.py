@@ -37,6 +37,12 @@ DEFAULT_SEARCH_ITER = 10
 SMALL_DATASET_ROWS = 2000
 LARGE_DATASET_ROWS = 50000
 
+# Recommendation rules for the distance and kernel models.
+# Nearest-neighbor distances lose meaning as dimensionality grows, and they
+# degrade on sparse one-hot matrices where most entries are zero.
+KNN_MAX_FEATURES = 50
+KNN_MAX_SPARSITY = 0.5
+
 # Default metrics per task.
 DEFAULT_METRICS = {
     "classification": "f1",
