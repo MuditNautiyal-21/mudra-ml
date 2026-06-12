@@ -32,6 +32,8 @@ import importlib
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.cluster import KMeans
 from sklearn.ensemble import (
     ExtraTreesClassifier,
@@ -44,6 +46,7 @@ from sklearn.ensemble import (
 from sklearn.linear_model import ElasticNet, LinearRegression, LogisticRegression, Ridge
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
@@ -198,6 +201,38 @@ def _regression_candidates(random_state: int) -> dict[str, Candidate]:
     }
 
 
+class LabelEncodedClassifier(BaseEstimator, ClassifierMixin):
+    """Adapter for classifiers that require consecutive integer class labels.
+
+    XGBoost rejects string labels. The adapter encodes the labels during fit
+    and inverse-transforms predictions, so callers see the original labels.
+    Probability columns follow ``classes_`` in sorted label order, the same
+    order scikit-learn classifiers use.
+    """
+
+    def __init__(self, estimator: Any = None) -> None:
+        self.estimator = estimator
+
+    def fit(self, X: Any, y: Any) -> LabelEncodedClassifier:
+        self.encoder_ = LabelEncoder()
+        encoded = self.encoder_.fit_transform(np.asarray(y))
+        self.estimator_ = clone(self.estimator)
+        self.estimator_.fit(X, encoded)
+        self.classes_ = self.encoder_.classes_
+        return self
+
+    def predict(self, X: Any) -> np.ndarray:
+        encoded = np.asarray(self.estimator_.predict(X), dtype=int)
+        return self.encoder_.inverse_transform(encoded)
+
+    def predict_proba(self, X: Any) -> np.ndarray:
+        return self.estimator_.predict_proba(X)
+
+    @property
+    def feature_importances_(self) -> Any:
+        return self.estimator_.feature_importances_
+
+
 def _import_booster(name: str) -> Any | None:
     """Import an optional boosting library, or return None when absent."""
     try:
@@ -207,25 +242,31 @@ def _import_booster(name: str) -> Any | None:
 
 
 def _xgboost_candidate(module: Any, task: str, random_state: int) -> Candidate:
-    estimator = (
-        module.XGBClassifier(
-            random_state=random_state,
-            n_jobs=-1,
-            eval_metric="logloss",
-            tree_method="hist",
+    grid: dict[str, list[Any]]
+    if task == "classification":
+        # Wrapped because XGBoost rejects labels that are not consecutive
+        # integers; the adapter encodes them and returns the originals.
+        estimator: Any = LabelEncodedClassifier(
+            estimator=module.XGBClassifier(
+                random_state=random_state,
+                n_jobs=-1,
+                eval_metric="logloss",
+                tree_method="hist",
+            )
         )
-        if task == "classification"
-        else module.XGBRegressor(random_state=random_state, n_jobs=-1, tree_method="hist")
-    )
-    return Candidate(
-        name="xgboost",
-        estimator=estimator,
-        param_grid={
+        grid = {
+            "estimator__n_estimators": [100, 200],
+            "estimator__learning_rate": [0.05, 0.1],
+            "estimator__max_depth": [3, 6],
+        }
+    else:
+        estimator = module.XGBRegressor(random_state=random_state, n_jobs=-1, tree_method="hist")
+        grid = {
             "n_estimators": [100, 200],
             "learning_rate": [0.05, 0.1],
             "max_depth": [3, 6],
-        },
-    )
+        }
+    return Candidate(name="xgboost", estimator=estimator, param_grid=grid)
 
 
 def _lightgbm_candidate(module: Any, task: str, random_state: int) -> Candidate:

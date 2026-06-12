@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mudra-ml"
-version = "0.4.0"
+version = "0.4.1"
 description = "Glass-box autonomous data science: profile, clean, model, and explain every decision."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -71,12 +71,12 @@ packages = ["src/mudra_ml"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "src/mudra_ml",
-    "tests",
-    "README.md",
-    "CHANGELOG.md",
-    "LICENSE",
-    "pyproject.toml",
+    "/src/mudra_ml",
+    "/tests",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/pyproject.toml",
 ]
 
 [tool.ruff]

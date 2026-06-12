@@ -62,6 +62,7 @@ class ReportContext:
     overfitting_gap: dict[str, float] = field(default_factory=dict)
     regression_diag: dict[str, Any] = field(default_factory=dict)
     positive_label: str | None = None
+    profile_columns: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _format_value(value: Any, fmt: str = "%.4f") -> str:
@@ -79,10 +80,13 @@ def _format_value(value: Any, fmt: str = "%.4f") -> str:
 
 _MARKDOWN_TEMPLATE = """# MudraML run report
 
+The sections follow the order the pipeline ran: what the data looks like,
+what was done to it, which models were tried, and how the winner performed.
+
+## Run summary
+
 Dataset: {{ ctx.dataset_name }}
 Rows: {{ ctx.n_rows }}  Columns: {{ ctx.n_columns }}
-
-## Goal
 
 | Field | Value | Source |
 | --- | --- | --- |
@@ -92,7 +96,91 @@ Rows: {{ ctx.n_rows }}  Columns: {{ ctx.n_columns }}
 {% if ctx.goal.constraints %}| Constraints | {{ ctx.goal.constraints }} | operator |
 {% endif %}
 
-## Trust summary
+## Data profile
+
+{% if ctx.profile_columns %}Per-column view of what the profiler saw. Distribution statistics are shown for numeric columns.
+
+| Column | Type | Missing | Unique | Min | Median | Max |
+| --- | --- | --- | --- | --- | --- | --- |
+{% for col in ctx.profile_columns %}| {{ col.name }} | {{ col.type }} | {{ "%.1f%%"|format(col.missing_fraction * 100) }} | {{ col.n_unique }} | {{ fmt(col.min) }} | {{ fmt(col.median) }} | {{ fmt(col.max) }} |
+{% endfor %}{% else %}No profile recorded for this run.
+{% endif %}
+{% if ctx.quality.missingness %}
+### Columns with missing values
+
+| Column | Missing | Fraction |
+| --- | --- | --- |
+{% for row in ctx.quality.missingness %}| {{ row.column }} | {{ row.missing_count }} | {{ "%.2f%%"|format(row.missing_fraction * 100) }} |
+{% endfor %}{% endif %}
+
+## Data quality
+
+{% if ctx.quality.warnings %}{% for w in ctx.quality.warnings %}- [{{ w.severity }}] {{ w.message }} _(rule: {{ w.code }})_
+{% endfor %}{% else %}No quality issues raised.
+{% endif %}
+{% if ctx.quality.class_balance %}
+### Class balance
+
+| Class | Count |
+| --- | --- |
+{% for label, count in ctx.quality.class_balance.items() %}| {{ label }} | {{ count }} |
+{% endfor %}{% endif %}
+{% if ctx.quality.outliers %}
+### Outlier counts (IQR rule)
+
+| Column | Outliers |
+| --- | --- |
+{% for row in ctx.quality.outliers %}| {{ row.column }} | {{ row.outlier_count }} |
+{% endfor %}{% endif %}
+{% if ctx.quality.leakage_suspects %}
+### Possible leakage
+
+| Feature | Reason | Score |
+| --- | --- | --- |
+{% for row in ctx.quality.leakage_suspects %}| {{ row.feature }} | {{ row.reason }} | {{ fmt(row.score) }} |
+{% endfor %}{% endif %}
+
+## Preprocessing
+
+What was done to each column before training, and the rule behind it.
+
+{% for d in ctx.decisions if d.stage in ("ingest", "preprocess") and d.rule != "train-test-split" %}- {{ d.decision }} _(rule: {{ d.rule }})_
+{% endfor %}
+
+## Split
+
+{% if ctx.test_set_size %}- Training rows: {{ ctx.train_set_size }}
+- Held-out test rows: {{ ctx.test_set_size }}
+{% else %}- Rows used: {{ ctx.train_set_size }} (no held-out split for this task)
+{% endif %}
+{% for d in ctx.decisions if d.rule == "train-test-split" %}- {{ d.decision }} _(rule: {{ d.rule }})_
+{% endfor %}
+
+## Model shortlist
+
+Which models were considered, included, or excluded, and the rule for each.
+
+{% for d in ctx.decisions if d.stage == "recommend" %}- {{ d.decision }} _(rule: {{ d.rule }})_
+{% endfor %}
+
+## Tuning and selection
+
+Selected model: {{ ctx.best_name }}
+{% if ctx.positive_label is not none %}Positive class (for precision, recall, f1, roc_auc): {{ ctx.positive_label }} (the minority class).
+{% endif %}Cross-validation score: {{ fmt(ctx.cv_mean) }} +/- {{ fmt(ctx.cv_std) }}
+{% if ctx.candidates %}
+### Candidates compared
+
+Ranked by cross-validation {{ ctx.metric }} (mean across folds). The held-out test set was scored only for the selected model.
+
+| Model | CV mean | CV std | Selected |
+| --- | --- | --- | --- |
+{% for cand in ctx.candidates %}| {{ cand.name }} | {{ fmt(cand.cv_mean) }} | {{ fmt(cand.cv_std) }} | {{ "yes" if cand.name == ctx.best_name else "no" }} |
+{% endfor %}{% endif %}
+
+## Evaluation
+
+### Trust summary
 
 {% if ctx.small_sample_warning %}Held-out test size: {{ ctx.test_set_size }} rows. Metrics are indicative only. Treat the numbers as a rough guide, not a verdict.
 {% else %}Held-out test size: {{ ctx.test_set_size }} rows. Training size: {{ ctx.train_set_size }} rows.
@@ -113,12 +201,6 @@ Train vs test gap on selected metrics (positive means train is better than test)
 {% for key, value in ctx.overfitting_gap.items() %}| {{ key }} | {{ fmt(ctx.train_metrics.get(key)) }} | {{ fmt(ctx.test_metrics.get(key)) }} | {{ fmt(value) }} |
 {% endfor %}
 {% endif %}
-## Result
-
-Selected model: {{ ctx.best_name }}
-{% if ctx.positive_label is not none %}Positive class (for precision, recall, f1, roc_auc): {{ ctx.positive_label }} (the minority class).
-{% endif %}Cross-validation score: {{ fmt(ctx.cv_mean) }} +/- {{ fmt(ctx.cv_std) }}
-
 Held-out metrics:
 
 {% for name, value in ctx.test_metrics.items() %}{% if name != "confusion_matrix" %}- {{ name }}: {{ fmt(value) }}
@@ -130,30 +212,8 @@ Held-out metrics:
 | --- | --- | --- | --- | --- |
 {% for label, values in ctx.per_class_report.items() %}{% if label not in ("accuracy", "macro avg", "weighted avg") %}| {{ label }} | {{ fmt(values.precision) }} | {{ fmt(values.recall) }} | {{ fmt(values.f1) }} | {{ "%d"|format(values.support|int) }} |
 {% endif %}{% endfor %}{% endif %}
-{% if ctx.candidates %}
-## Candidates compared
-
-Ranked by cross-validation {{ ctx.metric }} (mean across folds). The held-out test set was scored only for the selected model.
-
-| Model | CV mean | CV std | Selected |
-| --- | --- | --- | --- |
-{% for cand in ctx.candidates %}| {{ cand.name }} | {{ fmt(cand.cv_mean) }} | {{ fmt(cand.cv_std) }} | {{ "yes" if cand.name == ctx.best_name else "no" }} |
-{% endfor %}{% endif %}
-{% if ctx.permutation_importance %}
-## Feature importance (permutation, mean across {{ perm_repeats }} repeats)
-
-Impurity importance is biased toward high-cardinality features. The permutation view is more reliable because it scores each feature by how much shuffling it hurts the model.
-
-{% for name, score in ctx.permutation_importance.items() %}- {{ name }}: {{ fmt(score) }} (+/- {{ fmt(ctx.permutation_importance_std.get(name)) }})
-{% endfor %}{% elif ctx.feature_importance %}
-## Feature importance
-
-Note: this is impurity or coefficient importance, which can be biased toward high-cardinality features.
-
-{% for name, score in ctx.feature_importance.items() %}- {{ name }}: {{ fmt(score) }}
-{% endfor %}{% endif %}
 {% if ctx.task == "regression" and regression_diag %}
-## Regression diagnostics
+### Regression diagnostics
 
 Residual summary (actual minus predicted):
 
@@ -162,39 +222,18 @@ Residual summary (actual minus predicted):
 - Mean absolute error: {{ fmt(regression_diag.residual_abs_mean) }}
 - Max absolute residual: {{ fmt(regression_diag.residual_max) }}
 {% endif %}
+{% if ctx.permutation_importance %}
+### Feature importance (permutation, mean across {{ perm_repeats }} repeats)
 
-## Data quality
+Impurity importance is biased toward high-cardinality features. The permutation view is more reliable because it scores each feature by how much shuffling it hurts the model.
 
-{% if ctx.quality.warnings %}{% for w in ctx.quality.warnings %}- [{{ w.severity }}] {{ w.message }} _(rule: {{ w.code }})_
-{% endfor %}{% else %}No quality issues raised.
-{% endif %}
-{% if ctx.quality.class_balance %}
-### Class balance
+{% for name, score in ctx.permutation_importance.items() %}- {{ name }}: {{ fmt(score) }} (+/- {{ fmt(ctx.permutation_importance_std.get(name)) }})
+{% endfor %}{% elif ctx.feature_importance %}
+### Feature importance
 
-| Class | Count |
-| --- | --- |
-{% for label, count in ctx.quality.class_balance.items() %}| {{ label }} | {{ count }} |
-{% endfor %}{% endif %}
-{% if ctx.quality.missingness %}
-### Missingness
+Note: this is impurity or coefficient importance, which can be biased toward high-cardinality features.
 
-| Column | Missing | Fraction |
-| --- | --- | --- |
-{% for row in ctx.quality.missingness %}| {{ row.column }} | {{ row.missing_count }} | {{ "%.2f%%"|format(row.missing_fraction * 100) }} |
-{% endfor %}{% endif %}
-{% if ctx.quality.outliers %}
-### Outlier counts (IQR rule)
-
-| Column | Outliers |
-| --- | --- |
-{% for row in ctx.quality.outliers %}| {{ row.column }} | {{ row.outlier_count }} |
-{% endfor %}{% endif %}
-{% if ctx.quality.leakage_suspects %}
-### Possible leakage
-
-| Feature | Reason | Score |
-| --- | --- | --- |
-{% for row in ctx.quality.leakage_suspects %}| {{ row.feature }} | {{ row.reason }} | {{ fmt(row.score) }} |
+{% for name, score in ctx.feature_importance.items() %}- {{ name }}: {{ fmt(score) }}
 {% endfor %}{% endif %}
 {% if ctx.quality.next_steps %}
 ## Limitations and next steps
@@ -241,10 +280,11 @@ img.chart { max-width: 100%; height: auto; display: block; margin: 1rem 0; borde
 </head>
 <body>
 <h1>MudraML run report</h1>
+<p class="note">The sections follow the order the pipeline ran: what the data looks like, what was done to it, which models were tried, and how the winner performed.</p>
+
+<h2>Run summary</h2>
 <p>Dataset: <strong>{{ ctx.dataset_name }}</strong><br>
 Rows: {{ ctx.n_rows }} &nbsp; Columns: {{ ctx.n_columns }}</p>
-
-<h2>Goal</h2>
 <table>
 <tr><th>Field</th><th>Value</th><th>Source</th></tr>
 <tr><td>Task</td><td>{{ ctx.goal.task }}</td><td>{{ "operator" if "task" in ctx.operator_set_fields else "inferred" }}</td></tr>
@@ -253,7 +293,84 @@ Rows: {{ ctx.n_rows }} &nbsp; Columns: {{ ctx.n_columns }}</p>
 {% if ctx.goal.constraints %}<tr><td>Constraints</td><td>{{ ctx.goal.constraints }}</td><td>operator</td></tr>{% endif %}
 </table>
 
-<h2>Trust summary</h2>
+<h2>Data profile</h2>
+{% if ctx.profile_columns %}
+<p class="note">Per-column view of what the profiler saw. Distribution statistics are shown for numeric columns.</p>
+<table>
+<tr><th>Column</th><th>Type</th><th>Missing</th><th>Unique</th><th>Min</th><th>Median</th><th>Max</th></tr>
+{% for col in ctx.profile_columns %}<tr><td>{{ col.name }}</td><td>{{ col.type }}</td><td>{{ "%.1f%%"|format(col.missing_fraction * 100) }}</td><td>{{ col.n_unique }}</td><td>{{ fmt(col.min) }}</td><td>{{ fmt(col.median) }}</td><td>{{ fmt(col.max) }}</td></tr>{% endfor %}
+</table>
+{% else %}<p>No profile recorded for this run.</p>
+{% endif %}
+{% if ctx.quality.missingness %}
+<h3>Columns with missing values</h3>
+<table>
+<tr><th>Column</th><th>Missing</th><th>Fraction</th></tr>
+{% for row in ctx.quality.missingness %}<tr><td>{{ row.column }}</td><td>{{ row.missing_count }}</td><td>{{ "%.2f%%"|format(row.missing_fraction * 100) }}</td></tr>{% endfor %}
+</table>{% endif %}
+{% if ctx.charts.target_distribution %}<img class="chart" alt="Target distribution" src="data:image/png;base64,{{ ctx.charts.target_distribution }}">{% endif %}
+{% if ctx.charts.correlation %}<h3>Feature correlation</h3>
+<img class="chart" alt="Feature correlation" src="data:image/png;base64,{{ ctx.charts.correlation }}">{% endif %}
+
+<h2>Data quality</h2>
+{% if ctx.quality.warnings %}{% for w in ctx.quality.warnings %}<div class="{{ w.severity }}"><strong>{{ w.severity|upper }}:</strong> {{ w.message }} <span class="rule">(rule: {{ w.code }})</span></div>{% endfor %}{% else %}<p>No quality issues raised.</p>{% endif %}
+
+{% if ctx.quality.class_balance %}
+<h3>Class balance</h3>
+<table>
+<tr><th>Class</th><th>Count</th></tr>
+{% for label, count in ctx.quality.class_balance.items() %}<tr><td>{{ label }}</td><td>{{ count }}</td></tr>{% endfor %}
+</table>{% endif %}
+
+{% if ctx.quality.outliers %}
+<h3>Outlier counts (IQR rule)</h3>
+<table>
+<tr><th>Column</th><th>Outliers</th></tr>
+{% for row in ctx.quality.outliers %}<tr><td>{{ row.column }}</td><td>{{ row.outlier_count }}</td></tr>{% endfor %}
+</table>{% endif %}
+
+{% if ctx.quality.leakage_suspects %}
+<h3>Possible leakage</h3>
+<table>
+<tr><th>Feature</th><th>Reason</th><th>Score</th></tr>
+{% for row in ctx.quality.leakage_suspects %}<tr><td>{{ row.feature }}</td><td>{{ row.reason }}</td><td>{{ fmt(row.score) }}</td></tr>{% endfor %}
+</table>{% endif %}
+
+<h2>Preprocessing</h2>
+<p class="note">What was done to each column before training, and the rule behind it.</p>
+<ul>
+{% for d in ctx.decisions if d.stage in ("ingest", "preprocess") and d.rule != "train-test-split" %}<li>{{ d.decision }} <span class="rule">(rule: {{ d.rule }})</span></li>{% endfor %}
+</ul>
+
+<h2>Split</h2>
+<ul>
+{% if ctx.test_set_size %}<li>Training rows: {{ ctx.train_set_size }}</li>
+<li>Held-out test rows: {{ ctx.test_set_size }}</li>
+{% else %}<li>Rows used: {{ ctx.train_set_size }} (no held-out split for this task)</li>
+{% endif %}
+{% for d in ctx.decisions if d.rule == "train-test-split" %}<li>{{ d.decision }} <span class="rule">(rule: {{ d.rule }})</span></li>{% endfor %}
+</ul>
+
+<h2>Model shortlist</h2>
+<p class="note">Which models were considered, included, or excluded, and the rule for each.</p>
+<ul>
+{% for d in ctx.decisions if d.stage == "recommend" %}<li>{{ d.decision }} <span class="rule">(rule: {{ d.rule }})</span></li>{% endfor %}
+</ul>
+
+<h2>Tuning and selection</h2>
+<p>Selected model: <span class="metric">{{ ctx.best_name }}</span><br>
+{% if ctx.positive_label is not none %}Positive class (for precision, recall, f1, roc_auc): <span class="metric">{{ ctx.positive_label }}</span> (the minority class).<br>
+{% endif %}Cross-validation score: {{ fmt(ctx.cv_mean) }} &plusmn; {{ fmt(ctx.cv_std) }}</p>
+{% if ctx.candidates %}
+<h3>Candidates compared</h3>
+<p class="note">Ranked by cross-validation {{ ctx.metric }} (mean across folds). The held-out test set was scored only for the selected model.</p>
+<table>
+<tr><th>Model</th><th>CV mean</th><th>CV std</th><th>Selected</th></tr>
+{% for cand in ctx.candidates %}<tr><td>{{ cand.name }}</td><td>{{ fmt(cand.cv_mean) }}</td><td>{{ fmt(cand.cv_std) }}</td><td>{{ "yes" if cand.name == ctx.best_name else "no" }}</td></tr>{% endfor %}
+</table>{% endif %}
+
+<h2>Evaluation</h2>
+<h3>Trust summary</h3>
 {% if ctx.small_sample_warning %}<div class="critical">Held-out test size: {{ ctx.test_set_size }} rows. Metrics are indicative only.</div>
 {% else %}<p>Held-out test size: {{ ctx.test_set_size }} rows. Training size: {{ ctx.train_set_size }} rows.</p>
 {% endif %}
@@ -271,15 +388,10 @@ Rows: {{ ctx.n_rows }} &nbsp; Columns: {{ ctx.n_columns }}</p>
 {% for key, value in ctx.overfitting_gap.items() %}<tr><td>{{ key }}</td><td>{{ fmt(ctx.train_metrics.get(key)) }}</td><td>{{ fmt(ctx.test_metrics.get(key)) }}</td><td>{{ fmt(value) }}</td></tr>{% endfor %}
 </table>
 {% endif %}
-
-<h2>Result</h2>
-<p>Selected model: <span class="metric">{{ ctx.best_name }}</span><br>
-{% if ctx.positive_label is not none %}Positive class (for precision, recall, f1, roc_auc): <span class="metric">{{ ctx.positive_label }}</span> (the minority class).<br>
-{% endif %}Cross-validation score: {{ fmt(ctx.cv_mean) }} &plusmn; {{ fmt(ctx.cv_std) }}</p>
+<p>Held-out metrics:</p>
 <ul>
 {% for name, value in ctx.test_metrics.items() %}{% if name != "confusion_matrix" %}<li>{{ name }}: {{ fmt(value) }}</li>{% endif %}{% endfor %}
 </ul>
-{% if ctx.charts.target_distribution %}<img class="chart" alt="Target distribution" src="data:image/png;base64,{{ ctx.charts.target_distribution }}">{% endif %}
 
 {% if ctx.per_class_report %}
 <h3>Per-class report</h3>
@@ -312,60 +424,19 @@ Rows: {{ ctx.n_rows }} &nbsp; Columns: {{ ctx.n_columns }}</p>
 </div>
 {% endif %}
 
-{% if ctx.candidates %}<h2>Candidates compared</h2>
-<p class="note">Ranked by cross-validation {{ ctx.metric }} (mean across folds). The held-out test set was scored only for the selected model.</p>
-<table>
-<tr><th>Model</th><th>CV mean</th><th>CV std</th><th>Selected</th></tr>
-{% for cand in ctx.candidates %}<tr><td>{{ cand.name }}</td><td>{{ fmt(cand.cv_mean) }}</td><td>{{ fmt(cand.cv_std) }}</td><td>{{ "yes" if cand.name == ctx.best_name else "no" }}</td></tr>{% endfor %}
-</table>{% endif %}
-
-{% if ctx.permutation_importance %}<h2>Feature importance (permutation, mean across {{ perm_repeats }} repeats)</h2>
+{% if ctx.permutation_importance %}<h3>Feature importance (permutation, mean across {{ perm_repeats }} repeats)</h3>
 <p class="note">Impurity importance is biased toward high-cardinality features. The permutation view is more reliable.</p>
 <ul>
 {% for name, score in ctx.permutation_importance.items() %}<li>{{ name }}: {{ fmt(score) }} (&plusmn; {{ fmt(ctx.permutation_importance_std.get(name)) }})</li>{% endfor %}
 </ul>
 {% if ctx.charts.feature_importance %}<img class="chart" alt="Feature importance" src="data:image/png;base64,{{ ctx.charts.feature_importance }}">{% endif %}
-{% elif ctx.feature_importance %}<h2>Feature importance</h2>
+{% elif ctx.feature_importance %}<h3>Feature importance</h3>
 <p class="note">Impurity or coefficient importance. Can be biased toward high-cardinality features.</p>
 <ul>
 {% for name, score in ctx.feature_importance.items() %}<li>{{ name }}: {{ fmt(score) }}</li>{% endfor %}
 </ul>
 {% if ctx.charts.feature_importance %}<img class="chart" alt="Feature importance" src="data:image/png;base64,{{ ctx.charts.feature_importance }}">{% endif %}
 {% endif %}
-
-<h2>Data quality</h2>
-{% if ctx.quality.warnings %}{% for w in ctx.quality.warnings %}<div class="{{ w.severity }}"><strong>{{ w.severity|upper }}:</strong> {{ w.message }} <span class="rule">(rule: {{ w.code }})</span></div>{% endfor %}{% else %}<p>No quality issues raised.</p>{% endif %}
-
-{% if ctx.quality.class_balance %}
-<h3>Class balance</h3>
-<table>
-<tr><th>Class</th><th>Count</th></tr>
-{% for label, count in ctx.quality.class_balance.items() %}<tr><td>{{ label }}</td><td>{{ count }}</td></tr>{% endfor %}
-</table>{% endif %}
-
-{% if ctx.quality.missingness %}
-<h3>Missingness</h3>
-<table>
-<tr><th>Column</th><th>Missing</th><th>Fraction</th></tr>
-{% for row in ctx.quality.missingness %}<tr><td>{{ row.column }}</td><td>{{ row.missing_count }}</td><td>{{ "%.2f%%"|format(row.missing_fraction * 100) }}</td></tr>{% endfor %}
-</table>{% endif %}
-
-{% if ctx.quality.outliers %}
-<h3>Outlier counts (IQR rule)</h3>
-<table>
-<tr><th>Column</th><th>Outliers</th></tr>
-{% for row in ctx.quality.outliers %}<tr><td>{{ row.column }}</td><td>{{ row.outlier_count }}</td></tr>{% endfor %}
-</table>{% endif %}
-
-{% if ctx.charts.correlation %}<h3>Feature correlation</h3>
-<img class="chart" alt="Feature correlation" src="data:image/png;base64,{{ ctx.charts.correlation }}">{% endif %}
-
-{% if ctx.quality.leakage_suspects %}
-<h3>Possible leakage</h3>
-<table>
-<tr><th>Feature</th><th>Reason</th><th>Score</th></tr>
-{% for row in ctx.quality.leakage_suspects %}<tr><td>{{ row.feature }}</td><td>{{ row.reason }}</td><td>{{ fmt(row.score) }}</td></tr>{% endfor %}
-</table>{% endif %}
 
 {% if ctx.quality.next_steps %}
 <h2>Limitations and next steps</h2>
@@ -605,6 +676,21 @@ def build_context(
 
     overfitting_gap = _overfitting_gap(train_metrics, test_metrics, task)
     charts = _build_charts(evaluation, frame, profile, task)
+    profile_columns: list[dict[str, Any]] = []
+    if profile is not None:
+        for col in profile.columns.values():
+            stats = col.stats or {}
+            profile_columns.append(
+                {
+                    "name": col.name,
+                    "type": col.inferred_type,
+                    "missing_fraction": col.missing_fraction,
+                    "n_unique": col.n_unique,
+                    "min": stats.get("min"),
+                    "median": stats.get("median"),
+                    "max": stats.get("max"),
+                }
+            )
     quality_dict = quality.as_dict() if quality is not None else {
         "warnings": [],
         "class_balance": {},
@@ -644,4 +730,5 @@ def build_context(
         overfitting_gap=overfitting_gap,
         regression_diag=evaluation.get("regression_diagnostics", {}) or {},
         positive_label=evaluation.get("positive_label"),
+        profile_columns=profile_columns,
     )

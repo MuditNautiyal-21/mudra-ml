@@ -18,7 +18,7 @@ from .quality import QualityReport, QualityWarning, check_quality
 from .recommend import recommend_models
 from .report import write_report
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 __all__ = [
     "Mudra",

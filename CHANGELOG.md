@@ -3,6 +3,38 @@
 All notable changes to this project are recorded here. The format follows
 Keep a Changelog, and the project uses semantic versioning.
 
+## [0.4.1] - 2026-06-11
+
+### Changed
+- The report now reads in the order the pipeline actually runs: run
+  summary, data profile, data quality, preprocessing, split, model
+  shortlist, tuning and selection, evaluation, limitations and next steps,
+  and the full decision log last. The data profile gains a per-column
+  table (type, missingness, cardinality, and distribution statistics for
+  numeric columns) shown up front instead of after the model results. No
+  content was removed. In the HTML report each chart stays with its
+  section: the target distribution and feature correlation sit with the
+  profile, and the confusion matrix, ROC, precision-recall, residual, and
+  predicted-versus-actual charts sit in evaluation. Tests assert the
+  section order for a classification run and a regression run.
+
+### Fixed
+- The XGBoost classification candidate crashed any run whose target held
+  string labels (for example `good`/`bad` or `<=50K`/`>50K`), because
+  XGBoost only accepts consecutive integer classes. The candidate is now
+  wrapped in an adapter that encodes the labels during fit and returns the
+  original labels from predict, with probability columns following sorted
+  label order. LightGBM and CatBoost already handled string labels. The
+  offline suite covers all three boosters when they are installed.
+
+### Added
+- An on-demand production test suite under `production_tests/`, separate
+  from the offline unit suite: real public datasets (OpenML and
+  scikit-learn) end to end with save, load, and predict round-trips, real
+  booster training and selection, and scale runs at 1000, 10000, and
+  100000 rows with recorded run times and memory readings. It needs the
+  network and is not part of normal CI.
+
 ## [0.4.0] - 2026-06-11
 
 This release widens the algorithm roster, adds the pieces production use
